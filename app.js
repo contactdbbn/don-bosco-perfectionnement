@@ -1909,3 +1909,126 @@ window.addEventListener('offline',()=>{
   clearTimeout(v61RetryTimer);
   v61SetSyncState('offline','Aucune connexion réseau. Les changements seront resynchronisés au retour de la connexion.');
 });
+
+/* ========================= V79 — PUSH NOTIFICATIONS ========================= */
+(function(){
+  const V79_APP_URL='https://contactdbbn.github.io/don-bosco-perfectionnement/';
+  let busy=false;
+  function cfg(){ return window.SUPABASE_CONFIG||{}; }
+  function supports(){ return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && !!cfg().pushPublicKey; }
+  function urlBase64ToUint8Array(base64String){
+    const padding='='.repeat((4-(base64String.length%4))%4);
+    const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');
+    const raw=atob(base64); const out=new Uint8Array(raw.length);
+    for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+    return out;
+  }
+  async function registration(){ return await navigator.serviceWorker.ready; }
+  function subscriptionRow(sub,userId){
+    const json=sub.toJSON();
+    return {
+      profile_id:userId,
+      endpoint:json.endpoint,
+      p256dh:json.keys?.p256dh||'',
+      auth:json.keys?.auth||'',
+      user_agent:navigator.userAgent,
+      active:true,
+      updated_at:new Date().toISOString()
+    };
+  }
+  async function saveSubscription(sub){
+    const sb=v53Client(), user=v53User();
+    if(!sb||!user) throw new Error('Connexion requise.');
+    const row=subscriptionRow(sub,user.id);
+    if(!row.endpoint||!row.p256dh||!row.auth) throw new Error('Abonnement Push incomplet.');
+    const {error}=await sb.from('push_subscriptions').upsert(row,{onConflict:'profile_id,endpoint'});
+    if(error) throw error;
+  }
+  async function removeSubscription(sub){
+    const sb=v53Client(), user=v53User();
+    if(!sb||!user||!sub) return;
+    const endpoint=sub.endpoint;
+    const {error}=await sb.from('push_subscriptions').delete().eq('profile_id',user.id).eq('endpoint',endpoint);
+    if(error) console.warn('[V79] Suppression abonnement impossible.',error);
+  }
+  async function updateButton(){
+    const btn=document.getElementById('notifyBtn'); if(!btn) return;
+    if(!supports()){ btn.textContent='🔔 Notifications'; btn.disabled=true; btn.title='Notifications Push non supportées par ce navigateur.'; return; }
+    const permission=Notification.permission;
+    if(permission==='denied'){ btn.textContent='🔕 Notifications bloquées'; btn.disabled=false; btn.title='Autorisez les notifications dans les réglages du navigateur.'; return; }
+    try{
+      const sub=await (await registration()).pushManager.getSubscription();
+      if(permission==='granted' && sub){ btn.textContent='🔔 Notifications activées'; btn.disabled=false; btn.title='Notifications Push activées sur cet appareil.'; }
+      else { btn.textContent='🔔 Activer les notifications'; btn.disabled=false; btn.title='Activer les notifications Push sur cet appareil.'; }
+    }catch(_){ btn.textContent='🔔 Activer les notifications'; btn.disabled=false; }
+  }
+  async function subscribe(){
+    if(busy) return; busy=true;
+    try{
+      if(!supports()) throw new Error('Les notifications Push ne sont pas supportées par ce navigateur.');
+      if(!v53User()) throw new Error('Connectez-vous avant d’activer les notifications.');
+      if(!window.isSecureContext) throw new Error('Les notifications Push nécessitent une connexion HTTPS.');
+      const permission=Notification.permission==='granted'? 'granted' : await Notification.requestPermission();
+      if(permission!=='granted') throw new Error('Permission de notifications non accordée.');
+      const reg=await registration();
+      let sub=await reg.pushManager.getSubscription();
+      if(!sub){
+        sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(cfg().pushPublicKey)});
+      }
+      await saveSubscription(sub);
+      await updateButton();
+      toast('Notifications Push activées sur cet appareil.');
+      // Envoie une notification de test pour valider immédiatement la chaîne complète.
+      const sb=v53Client();
+      if(sb){
+        try{
+          const {data,error}=await sb.functions.invoke('push-notifications',{body:{action:'test'}});
+          if(error) console.warn('[V79] Test Push impossible.',error);
+          else if(data?.sent) toast('Notification de test envoyée.');
+        }catch(e){ console.warn('[V79] Test Push impossible.',e); }
+      }
+    }catch(e){ console.warn('[V79]',e); toast(e?.message||'Impossible d’activer les notifications.'); }
+    finally{ busy=false; await updateButton(); }
+  }
+  async function unsubscribe(){
+    if(busy) return; busy=true;
+    try{
+      const reg=await registration(); const sub=await reg.pushManager.getSubscription();
+      if(sub){ await removeSubscription(sub); await sub.unsubscribe(); }
+      toast('Notifications désactivées sur cet appareil.');
+    }catch(e){ console.warn('[V79] Désactivation impossible.',e); toast('Impossible de désactiver les notifications.'); }
+    finally{ busy=false; await updateButton(); }
+  }
+  async function syncExisting(){
+    if(!supports()||!v53User()||Notification.permission!=='granted') return;
+    try{
+      const sub=await (await registration()).pushManager.getSubscription();
+      if(sub) await saveSubscription(sub);
+    }catch(e){ console.warn('[V79] Synchronisation abonnement Push impossible.',e); }
+    finally{ await updateButton(); }
+  }
+  async function click(){
+    if(Notification.permission==='granted'){
+      const sub=await (await registration()).pushManager.getSubscription().catch(()=>null);
+      if(sub){
+        await unsubscribe();
+        return;
+      }
+    }
+    await subscribe();
+  }
+  window.v79PushSubscribe=subscribe;
+  window.v79PushUnsubscribe=unsubscribe;
+  window.v79PushSync=syncExisting;
+  window.v79PushTest=async()=>{
+    const sb=v53Client(); if(!sb||!v53User()) return toast('Connectez-vous pour tester les notifications.');
+    try{ const {data,error}=await sb.functions.invoke('push-notifications',{body:{action:'test'}}); if(error)throw error; toast(data?.sent?'Notification de test envoyée.':'Aucun appareil Push actif.'); }catch(e){ console.warn(e); toast('Test Push impossible. Vérifiez le déploiement Supabase V79.'); }
+  };
+  window.v79UpdatePushButton=updateButton;
+  const btn=document.getElementById('notifyBtn');
+  if(btn){ btn.onclick=click; }
+  document.addEventListener('supabase-auth-change',()=>{ setTimeout(syncExisting,250); });
+  window.addEventListener('focus',()=>{ if(v53User()) syncExisting(); });
+  window.addEventListener('pageshow',()=>{ if(v53User()) syncExisting(); });
+  setTimeout(()=>{ updateButton(); if(v53User()) syncExisting(); },1200);
+})();
