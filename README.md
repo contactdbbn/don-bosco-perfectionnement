@@ -1,151 +1,18 @@
-# Don Bosco - Perfectionnement — V77
+# Don Bosco - Perfectionnement — V78 Mobile/PWA
 
-V77 améliore le tri des demandes dans l'administration :
-- demandes en cours triées par semaine concernée, de la plus ancienne à la plus récente ;
-- à semaine identique, les demandes de changement de créneau conservent la priorité au plus faible nombre de changements puis à la date d'envoi ;
-- demandes traitées triées par semaine concernée, de la plus récente à la plus ancienne ;
-- à semaine identique, les demandes les plus récemment traitées apparaissent en premier.
+V78 est basée sur V77 et conserve les fonctionnalités métier et la configuration Supabase de V77.
 
-Aucun changement SQL. Cache applicatif : `app.js?v=20260909-v77`.
+## Nouveautés V78
+- interface responsive renforcée pour téléphone et tablette ;
+- navigation par onglets défilables sur petits écrans ;
+- boutons et champs adaptés au tactile ;
+- en-tête compact sur mobile ;
+- métadonnées PWA et manifest ;
+- ouverture installée en mode application (`standalone`) ;
+- service worker pour le shell de l'application ;
+- icônes d'installation Don Bosco.
 
+## Publication
+Les fichiers à publier sur GitHub Pages sont ceux de ce dossier.
 
-## V65 — Gestion des rôles lisible et créneau administrateur facultatif
-
-V65 améliore la gestion des rôles : les administrateurs peuvent avoir un créneau habituel facultatif, les encadrants restent sans créneau, et le mode administrateur ne change plus lors de la modification du rôle d un autre membre. La liste des rôles est présentée sous forme de lignes lisibles.
-
-- Aucun nouveau SQL structurel ; `supabase/v65.sql` documente les règles métier.
-- Cache applicatif : `app.js?v=20260908-v65`.
-
-## V64 — Encadrant / Administrateur sans créneau
-- Les comptes Encadrant et Administrateur peuvent être créés sans créneau habituel.
-- Le rôle Adhérent reste obligatoirement associé à un créneau.
-- Les profils staff sont affichés dans un groupe séparé et exclus des quotas/présences adhérents.
-- Le changement de rôle vers Encadrant/Administrateur retire automatiquement le créneau ; le retour vers Adhérent demande un créneau.
-- Le champ `members.habitual_slot` devient nullable, avec contrainte `NULL ou 1..3`.
-- Le rôle distant `profiles.role` reste la source d'autorité à la connexion.
-- Exécuter `supabase/v64.sql` avant publication.
-
-# Don Bosco - Perfectionnement — V55
-
-V55b renforce la gestion des comptes Supabase Auth :
-
-- mot de passe temporaire lors de la création d’un compte adhérent ;
-- obligation de remplacer ce mot de passe à la première connexion ;
-- réinitialisation administrateur = nouveau mot de passe temporaire ;
-- minimum de 6 caractères cohérent entre l’interface et le serveur ;
-- journalisation serveur des opérations sensibles (création, reset, email, activation/désactivation) ;
-- correction de l’appel calendrier dupliqué de V54 ;
-- conservation de l’adresse email du compte dans `profiles.auth_email`.
-
-## Mise à jour Supabase
-
-1. Dans **SQL Editor**, exécuter `supabase/v55.sql`.
-2. Redéployer la fonction Edge `admin-user` avec `supabase/functions/admin-user/index.ts`.
-3. Ne jamais placer `SUPABASE_SERVICE_ROLE_KEY` dans `supabase-config.js`, `app.js` ou le dépôt GitHub.
-
-## Test conseillé
-
-Créer un compte test depuis **Adhérents → Comptes adhérents**. Se connecter avec le mot de passe temporaire : l’application doit immédiatement demander un nouveau mot de passe. Après modification, la connexion normale doit fonctionner et le compte ne doit plus redemander ce changement.
-
-Puis effectuer un **réinitialiser le mot de passe** depuis l’administration et vérifier que la demande de changement réapparaît à la prochaine connexion.
-
-
-### Correctif V55b
-Si un adhérent se connecte avec le mot de passe par défaut `123456`, le changement est maintenant détecté immédiatement à la connexion et le formulaire obligatoire s’ouvre. Le mot de passe `123456` ne peut plus être choisi comme nouveau mot de passe.
-
-
-## V56 — correction sécurité changement de mot de passe
-- Le changement de mot de passe adhérent passe désormais par l’Edge Function `admin-user` avec l’action `self_change_password`.
-- Le navigateur ne tente plus de modifier directement `profiles.must_change_password`, ce qui évite le refus RLS observé avec la politique admin-only.
-- Le serveur met à jour le mot de passe Supabase Auth puis remet `must_change_password=false`.
-- Le mot de passe `123456` reste interdit comme nouveau mot de passe.
-- Aucun nouveau secret n’est ajouté au navigateur.
-- Exécuter `supabase/v56.sql` est sans effet de bord et ne demande aucune nouvelle colonne.
-
-### Déploiement V56
-1. Remplacer les fichiers du site par ceux de la V56.
-2. Redéployer l’Edge Function `admin-user`.
-3. `supabase/v56.sql` peut être exécuté dans SQL Editor ; il ne modifie pas la structure.
-4. Tester un compte utilisant encore `123456` : connexion → changement obligatoire → nouveau mot de passe → reconnexion normale.
-
-
-## V57 — durcissement comptes
-- Changement de mot de passe personnel vérifié côté serveur : profil existant et actif obligatoires.
-- `profiles.must_change_password` ne peut plus être modifié directement par le navigateur.
-- Journalisation des changements de mot de passe conservée, avec erreur d’audit non bloquante.
-- Cache applicatif : `app.js?v=20260908-v57`.
-- Aucun changement de schéma requis ; `supabase/v57.sql` documente la migration.
-
-
-## V60 — reprise de session sécurisée
-- Si un compte est marqué `must_change_password=true`, le changement obligatoire est maintenant affiché aussi après une restauration de session Supabase (par exemple après actualisation de la page).
-- Le titre du formulaire distingue le changement obligatoire du changement volontaire depuis le profil.
-- Aucun changement de schéma requis ; `supabase/v58.sql` documente la migration sans effet de structure.
-- Cache applicatif : `app.js?v=20260908-v59`.
-
-
-## V59 – Fiabilisation de session
-- Vérification de session au retour sur l’onglet et au focus de la fenêtre.
-- Gestion explicite du rafraîchissement de jeton Supabase.
-- Message dédié si la session expire ou devient invalide.
-- Aucun changement SQL requis ; `supabase/v59.sql` documente la version.
-
-
-## V60 — état réseau et synchronisation manuelle
-- Affichage discret de l’état En ligne / Hors ligne / Synchronisation / Erreur.
-- Bouton « Synchroniser » pour recharger les données Supabase à la demande.
-- Détection des événements réseau `online` / `offline`.
-- Au retour en ligne, une synchronisation est relancée automatiquement si un utilisateur est connecté.
-- Aucun changement SQL ni Edge Function requis.
-
-
-## V61 — synchronisation fiable
-- Une synchronisation manuelle pousse d'abord les changements locaux puis recharge les données distantes.
-- Les erreurs de synchronisation sont mémorisées et affichées clairement.
-- Une nouvelle tentative automatique est planifiée en cas d'échec réseau (5 s à 60 s).
-- Le retour en ligne déclenche une synchronisation complète.
-- Aucun changement SQL n'est nécessaire pour V61.
-
-
-## V63 — suivi de sécurité des comptes
-- L espace administrateur « Comptes adhérents » affiche désormais la dernière connexion Auth de chaque compte.
-- Il affiche aussi l état du mot de passe : modifié avec date, temporaire à changer, ou modification non renseignée pour les anciens comptes.
-- Supabase Auth fournit `last_sign_in_at`; la date de modification du mot de passe est stockée dans `profiles.password_changed_at`.
-- La modification personnelle du mot de passe renseigne cette date côté serveur. Une création ou une réinitialisation administrateur remet la date à NULL et impose un nouveau changement.
-- La liste des statuts de comptes est récupérée uniquement par la fonction Edge `admin-user`; aucune clé service n est exposée au navigateur.
-- Exécuter `supabase/v63.sql`, puis redéployer la fonction `admin-user` et publier les fichiers web V63.
-
-## V67 — correction gestion des rôles
-- La protection contre la modification de son propre compte administrateur utilise désormais l'identité réelle du compte Supabase Auth (UUID), et non `currentMemberId`.
-- Cela évite le faux message « Vous modifiez votre propre compte administrateur » lorsqu'un ancien identifiant local correspond au membre ciblé.
-- Le mode Administrateur reste inchangé lors de la modification du rôle d'un autre compte.
-- Aucun changement de schéma Supabase ; `supabase/v66.sql` est documentaire.
-
-
-## V67 — correctif connexion Encadrant
-- Corrige le plantage lors de la connexion d’un compte Encadrant.
-- Le suivi Encadrant est rendu directement dans `member-historyView`, qui existe réellement dans le DOM.
-- Suppression de la référence invalide à `followUpView`, responsable de l’erreur `innerHTML` sur un élément nul.
-- Aucun changement SQL nécessaire.
-
-## V68 — déconnexion forcée et nom de l’utilisateur connecté
-- Ajout de `profiles.force_logout_at` via `supabase/v68.sql`.
-- Dans **Gérer le compte**, l’administrateur peut **forcer la déconnexion de l’application** d’un autre compte.
-- Le navigateur contrôle ce marqueur toutes les 15 secondes et au retour sur l’onglet/focus.
-- Une réinitialisation de mot de passe ou une désactivation déclenche également une déconnexion forcée de l’application.
-- Le bandeau supérieur affiche désormais **Connecté : Prénom Nom** (selon `display_name`).
-- Déployer `supabase/v70.sql` puis redéployer la fonction Edge `admin-user`.
-
-
-## V70 — demandes de modification de présence
-- Les demandes de modification de présence restent possibles à partir de 19h30 le jour du cours et pour les dates passées.
-- Après envoi, l adhérent voit clairement « Statut demandé : … — en attente de validation ».
-- Mon suivi affiche le créneau effectif lorsqu un changement de créneau est approuvé pour la séance concernée.
-- Les demandes de statut sont synchronisées vers Supabase avant l affichage de la confirmation d envoi.
-- Aucun changement SQL n est nécessaire pour V70.
-
-## V71
-- La page Présences n'affiche plus les boutons de demande de modification de statut.
-- En administration, toutes les demandes en attente sont affichées sans filtre sur la semaine sélectionnée.
-- Le traitement automatique « 13h30 » ne traite que les demandes de changement de créneau de la semaine en cours.
-- Priorité : nombre de changements effectués croissant, puis ordre d'envoi de la demande.
+**Important :** ne jamais publier de clé `sb_secret_...`, `service_role` ou de mot de passe PostgreSQL.
