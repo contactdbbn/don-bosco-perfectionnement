@@ -50,6 +50,7 @@ function isoWeekMonday(date = new Date()) {
 
 async function sendToProfile(profileId: string, title: string, body: string, data: Record<string, unknown> = {}) {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) throw new Error('VAPID keys not configured.')
+  console.log(`[push] envoi demandé profile=${profileId} title="${title}"`)
   const keys = await deserializeVapidKeys({ publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY })
   const { data: subscriptions, error } = await admin
     .from('push_subscriptions')
@@ -58,32 +59,63 @@ async function sendToProfile(profileId: string, title: string, body: string, dat
     .eq('active', true)
   if (error) throw error
 
+  console.log(`[push] abonnements actifs profile=${profileId}: ${(subscriptions || []).length}`)
+  if (!subscriptions?.length) return 0
+
   let sent = 0
   for (const sub of subscriptions || []) {
+    const endpointHint = String(sub.endpoint || '').slice(0, 70)
     try {
+      console.log(`[push] tentative endpoint=${endpointHint}`)
       const response = await sendPushNotification(
         keys,
         { endpoint: sub.endpoint, keys: { auth: sub.auth, p256dh: sub.p256dh } },
         VAPID_SUBJECT,
         JSON.stringify({ title, body, data: { ...data, url: APP_URL } }),
       )
+      console.log(`[push] réponse endpoint=${endpointHint} status=${response.status} ok=${response.ok}`)
       if (response.ok) {
         sent++
         await admin.from('push_subscriptions').update({ last_used_at: new Date().toISOString() }).eq('id', sub.id)
+        console.log(`[push] envoi réussi subscription=${sub.id}`)
       } else if (response.status === 404 || response.status === 410) {
         await admin.from('push_subscriptions').update({ active: false }).eq('id', sub.id)
+        console.warn(`[push] abonnement désactivé status=${response.status} subscription=${sub.id}`)
+      } else {
+        console.warn(`[push] envoi refusé status=${response.status} subscription=${sub.id}`)
       }
     } catch (e) {
       const status = Number((e as any)?.statusCode || (e as any)?.status || 0)
-      if (status === 404 || status === 410) await admin.from('push_subscriptions').update({ active: false }).eq('id', sub.id)
-      else console.warn('[V79] Push delivery failed', sub.endpoint, e)
+      console.error(`[push] erreur endpoint=${endpointHint} status=${status}`, e)
+      if (status === 404 || status === 410) {
+        await admin.from('push_subscriptions').update({ active: false }).eq('id', sub.id)
+        console.warn(`[push] abonnement désactivé après erreur status=${status} subscription=${sub.id}`)
+      }
     }
   }
+  console.log(`[push] résultat profile=${profileId}: ${sent}/${subscriptions.length} envoi(s) réussi(s)`)
   return sent
 }
 
 async function logOnce(profileId: string, type: string, eventKey: string, title: string, body: string) {
-  const { data, error } = await admin.from('push_notification_log').insert({ profile_id: profileId, notification_type: type, event_key: eventKey, title, body }).select('id').maybeSingle()
+  const { data: existing, error: existingError } = await admin
+    .from('push_notification_log')
+    .select('id')
+    .eq('profile_id', profileId)
+    .eq('notification_type', type)
+    .eq('event_key', eventKey)
+    .maybeSingle()
+  if (existingError) throw existingError
+  if (existing) return false
+  return true
+}
+
+async function markLogged(profileId: string, type: string, eventKey: string, title: string, body: string) {
+  const { data, error } = await admin
+    .from('push_notification_log')
+    .insert({ profile_id: profileId, notification_type: type, event_key: eventKey, title, body })
+    .select('id')
+    .maybeSingle()
   if (error) {
     if (String(error.code) === '23505') return false
     throw error
@@ -111,7 +143,7 @@ async function dispatch() {
         if (attendance?.status) continue
         const title = 'Rappel de présence'
         const body = `Merci de confirmer votre présence pour la semaine du ${new Date(`${nextWeek}T12:00:00`).toLocaleDateString('fr-FR')}.`
-        if (await logOnce(p.id, 'attendance_reminder', nextWeek, title, body)) sent += await sendToProfile(p.id, title, body, { type: 'attendance_reminder', week: nextWeek })
+        if (await logOnce(p.id, 'attendance_reminder', nextWeek, title, body)) { const delivered = await sendToProfile(p.id, title, body, { type: 'attendance_reminder', week: nextWeek }); if (delivered > 0) { await markLogged(p.id, 'attendance_reminder', nextWeek, title, body); sent += delivered } }
       }
     }
   }
@@ -124,12 +156,12 @@ async function dispatch() {
   for (const req of newMoves || []) {
     const title = 'Nouvelle demande de créneau'
     const body = `Une demande de changement de créneau concerne la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    for (const s of staff || []) if (await logOnce(s.id, 'new_slot_request', String(req.id), title, body)) sent += await sendToProfile(s.id, title, body, { type:'slot_request', requestId:req.id })
+    for (const s of staff || []) if (await logOnce(s.id, 'new_slot_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'slot_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_slot_request', String(req.id), title, body); sent += delivered } }
   }
   for (const req of newStatuses || []) {
     const title = 'Nouvelle demande de présence'
     const body = `Une demande de modification de présence est en attente pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    for (const s of staff || []) if (await logOnce(s.id, 'new_status_request', String(req.id), title, body)) sent += await sendToProfile(s.id, title, body, { type:'status_request', requestId:req.id })
+    for (const s of staff || []) if (await logOnce(s.id, 'new_status_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'status_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_status_request', String(req.id), title, body); sent += delivered } }
   }
 
   // 3) Décisions récentes : notification à l'adhérent concerné.
@@ -141,7 +173,7 @@ async function dispatch() {
     const title = 'Demande de créneau'
     const label = req.status === 'approved' ? 'validée' : req.status === 'rejected' ? 'refusée' : 'annulée'
     const body = `Votre demande de changement de créneau a été ${label} pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    if (await logOnce(profile.id, 'slot_request_decision', String(req.id), title, body)) sent += await sendToProfile(profile.id, title, body, { type:'slot_request_decision', requestId:req.id, status:req.status })
+    if (await logOnce(profile.id, 'slot_request_decision', String(req.id), title, body)) { const delivered = await sendToProfile(profile.id, title, body, { type:'slot_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) { await markLogged(profile.id, 'slot_request_decision', String(req.id), title, body); sent += delivered } }
   }
   for (const req of decidedStatuses || []) {
     const { data: profile } = await admin.from('profiles').select('id').eq('member_id', req.member_id).maybeSingle()
@@ -149,7 +181,7 @@ async function dispatch() {
     const title = 'Demande de présence'
     const label = req.status === 'approved' ? 'validée' : req.status === 'rejected' ? 'refusée' : 'annulée'
     const body = `Votre demande de modification de présence a été ${label} pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    if (await logOnce(profile.id, 'status_request_decision', String(req.id), title, body)) sent += await sendToProfile(profile.id, title, body, { type:'status_request_decision', requestId:req.id, status:req.status })
+    if (await logOnce(profile.id, 'status_request_decision', String(req.id), title, body)) { const delivered = await sendToProfile(profile.id, title, body, { type:'status_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) { await markLogged(profile.id, 'status_request_decision', String(req.id), title, body); sent += delivered } }
   }
 
   return { ok: true, sent, week, now }
@@ -188,7 +220,7 @@ export default {
       }
       return json({ error: 'Action inconnue.' }, 400)
     } catch (e) {
-      console.error('[V79 push-notifications]', e)
+      console.error('[V82 push-notifications]', e)
       return json({ error: String((e as any)?.message || e) }, 500)
     }
   }
