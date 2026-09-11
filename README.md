@@ -1,8 +1,8 @@
-# Don Bosco - Perfectionnement — V79 Notifications Push
+# Don Bosco - Perfectionnement — V80 Notifications Push
 
-V79 est basée sur V78 Mobile/PWA. Elle conserve le métier V77/V78 et ajoute de vraies notifications Web Push reliées à Supabase.
+V80 est basée sur V78 Mobile/PWA. Elle conserve le métier V77/V78 et ajoute de vraies notifications Web Push reliées à Supabase.
 
-## Ce que V79 ajoute
+## Ce que V80 ajoute
 
 - abonnement Push par appareil et par compte ;
 - permission navigateur demandée après clic sur « Activer les notifications » ;
@@ -24,7 +24,7 @@ La clé publique est intégrée à `supabase-config.js` et peut être publiée c
 
 La clé privée VAPID **ne doit jamais être publiée sur GitHub**.
 
-La paire générée pour V79 est documentée dans le fichier de préparation secret remis séparément. Copier la clé privée uniquement dans les secrets de la fonction Supabase.
+La paire générée pour V80 est documentée dans le fichier de préparation secret remis séparément. Copier la clé privée uniquement dans les secrets de la fonction Supabase.
 
 ## 3. Déployer l'Edge Function
 
@@ -48,7 +48,7 @@ Configurer `verify_jwt = false` pour cette fonction, car le déclenchement Cron 
 
 Dans les secrets de la fonction :
 
-- `VAPID_PUBLIC_KEY` = la clé publique fournie avec V79
+- `VAPID_PUBLIC_KEY` = la clé publique fournie avec V80
 - `VAPID_PRIVATE_KEY` = la clé privée fournie séparément
 - `VAPID_SUBJECT` = `https://contactdbbn.github.io/don-bosco-perfectionnement/`
 - `PUSH_CRON_SECRET` = le secret fourni séparément
@@ -91,7 +91,7 @@ Publier les fichiers web à la racine du dépôt `main` comme pour V78.
 
 ## 7. Test utilisateur
 
-1. Ouvrir V79 en HTTPS.
+1. Ouvrir V80 en HTTPS.
 2. Se connecter.
 3. Appuyer sur « 🔔 Activer les notifications ».
 4. Autoriser les notifications.
@@ -99,3 +99,9 @@ Publier les fichiers web à la racine du dépôt `main` comme pour V78.
 6. Fermer complètement l'application puis refaire un test pour vérifier le Push hors premier plan.
 
 Les notifications Web Push nécessitent HTTPS, un Service Worker actif et un abonnement `PushManager` avec une clé publique VAPID. Voir la documentation MDN et Supabase référencée dans le projet.
+
+
+## V80 — correction des contrôles de présence
+- Une demande de modification de présence en attente ne concerne que sa semaine/date exacte et ne bloque pas les autres dates.
+- Les contrôles de présence des modes Administrateur/Encadrant sont explicitement considérés comme éditables indépendamment de l’état du compte adhérent concerné.
+- Fonctionnalités Push V79 et configuration Supabase conservées.

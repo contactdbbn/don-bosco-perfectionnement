@@ -629,8 +629,10 @@ function personHtml(m){
  const move=getMoveForMember(m.id);
  const otherSlots=SLOT_NAMES.map((name,i)=>i+1).filter(slot=>slot!==m.slot);
  const moveLabel=move?(move.status==="approved"?`Créneau demandé : ${move.to} ✓`:`Demande en attente : créneau ${move.to}`):"";
- const statusRequest=db.statusRequests.find(r=>r.memberId===Number(m.id)&&r.week===key&&r.status==="pending");
- const actions=(currentRole==="admin" || (editable && isAttendanceWeek() && !locked))
+ const eventDate=getAttendanceEventDate(key);
+ const statusRequest=db.statusRequests.find(r=>Number(r.memberId)===Number(m.id)&&r.week===key&&(!r.eventDate||!eventDate||r.eventDate===eventDate)&&r.status==="pending");
+ const staffCanEdit=authState==="admin"||authState==="coach";
+ const actions=(staffCanEdit || (editable && isAttendanceWeek() && !locked))
    ? `<div class="actions">
        <button onclick="setStatus(${m.id},'present')">Présent</button>
        <button class="${st==='absent'?'danger':''}" onclick="setStatus(${m.id},'absent')">Absent</button>
@@ -641,7 +643,7 @@ function personHtml(m){
       : (isPastWeek(key) && hasResponded(m.id,key)
          ? `<div class="muted">Date passée — statut verrouillé</div>${statusRequest?`<div class="muted request-pending">⏳ Modification demandée — en attente de validation</div>`:""}`
          : `<div class="muted">${isPastWeek(key) ? "Date passée — modification directe réservée à l’administrateur" : "Lecture seule"}</div>`));
- const slotActions=(currentRole==="admin" || (editable && isAttendanceWeek() && !locked))
+ const slotActions=(staffCanEdit || (editable && isAttendanceWeek() && !locked))
    && st!=="absent"&&!move
    ? `<div class="slot-request"><span class="muted">Présent mais souhaite jouer sur :</span>${otherSlots.map(slot=>`<button onclick="requestSlot(${m.id},${slot})">${SLOT_NAMES[slot-1]}</button>`).join("")}</div>` : "";
  return `<div class="person">
