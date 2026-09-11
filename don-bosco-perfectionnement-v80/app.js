@@ -494,13 +494,11 @@ function memberHistoryRow(event,me){
  const effectiveSlot=getEffectiveSlot(me.id,weekKey);
  const approvedMove=getWeekMoves(weekKey).find(r=>Number(r.memberId)===Number(me.id)&&r.status==='approved');
  const slotInfo=approvedMove&&effectiveSlot?`<span class="history-slot">Créneau effectif : ${SLOT_NAMES[effectiveSlot-1]}</span>`:'';
- const absencePeriod=(db.absencePeriods||[]).find(a=>Number(a.memberId)===Number(me.id)&&a.start<=weekKey&&a.end>=weekKey);
- const absenceIndicator=absencePeriod?`<div class="absence-warning" title="Une période d’absence couvre cette semaine.">⚠️ <strong>Période d’absence active</strong><span> · ${fmt(absencePeriod.start)} → ${fmt(absencePeriod.end)}</span></div>`:'';
  const statusButtons=`<div class="history-actions"><button class="${st==='present'?'primary':''}" onclick="setStatusForWeek(${me.id},'present','${weekKey}')">Présent</button><button class="${st==='absent'?'danger':''}" onclick="setStatusForWeek(${me.id},'absent','${weekKey}')">Absent</button><button class="${st==='pending'?'secondary':''}" onclick="setStatusForWeek(${me.id},'pending','${weekKey}')">À confirmer</button></div>`;
  const requestButtons=`<div class="history-actions"><span class="muted">Demander une modification :</span><button onclick="requestStatusChangeForEvent(${me.id},'present','${eventDate}','${weekKey}')">Présent</button><button onclick="requestStatusChangeForEvent(${me.id},'absent','${eventDate}','${weekKey}')">Absent</button><button onclick="requestStatusChangeForEvent(${me.id},'pending','${eventDate}','${weekKey}')">À confirmer</button></div>`;
  const pendingLabel=pendingReq?`<div class="muted request-pending">⏳ Statut demandé : <strong>${labels[pendingReq.requestedStatus]}</strong> — en attente de validation</div>`:'';
  const controls=(!past&&!locked)?statusButtons:(past?`<div class="muted">Statut historique — modification directe réservée à l’administrateur</div>${request?(pendingReq?pendingLabel:requestButtons):`<div class="muted">Aucune réponse enregistrée : aucune demande de modification à envoyer.</div>`}`:`<div class="muted">Statut verrouillé après 19h30</div>${request?(pendingReq?pendingLabel:requestButtons):``}`);
- return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}${absenceIndicator}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${controls}</div></div>`;
+ return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${controls}</div></div>`;
 }
 if(!db.sessionObjectives||typeof db.sessionObjectives!=='object') db.sessionObjectives={};
 function getCourseDates(){
