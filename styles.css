@@ -12,7 +12,8 @@ button,input,select{font:inherit} button{cursor:pointer;border:0}
 h1{font-size:32px;margin:0 0 8px}.hero p:not(.eyebrow){margin:0;color:var(--muted)}
 .week-nav{display:flex;gap:7px}.week-nav button,.secondary{background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:10px;color:var(--text)}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px}.stat{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:var(--radius);padding:20px}.stat .num{font-size:27px;font-weight:800}.stat .label{color:var(--muted);font-size:13px;margin-top:5px}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:22px}.tab{background:transparent;padding:13px 17px;color:var(--muted);border-bottom:2px solid transparent}.tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:22px}
+.top-tabs{max-width:1200px;margin:0 auto;padding:0 24px;background:var(--bg);overflow-x:auto;white-space:nowrap}.tab{background:transparent;padding:13px 17px;color:var(--muted);border-bottom:2px solid transparent}.tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
 .badge{background:var(--red);color:white;border-radius:99px;padding:2px 7px;font-size:11px}
 .slot{background:#fff;border:1px solid var(--line);box-shadow:var(--shadow);border-radius:var(--radius);margin-bottom:18px;overflow:hidden}
 .slot-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.slot-title{font-weight:800;font-size:18px}.capacity{color:var(--muted);font-size:13px}
@@ -270,3 +271,7 @@ img,svg,canvas{max-width:100%;}
 }
 
 .absence-warning{display:inline-flex;align-items:center;gap:4px;margin-top:7px;padding:7px 10px;border:1px solid #f2c66d;background:#fff8df;color:#795b00;border-radius:9px;font-size:13px;line-height:1.35}.absence-warning span{font-weight:500}.absence-warning strong{font-weight:700}
+
+/* V84 — menu principal en haut, filtres/compteurs réservés à Présences */
+.top-tabs{scrollbar-width:none}.top-tabs::-webkit-scrollbar{display:none}
+@media(max-width:760px){.top-tabs{margin:0;padding:0 14px;gap:2px}.top-tabs .tab{padding:11px 13px}.top-tabs{margin-bottom:18px}}

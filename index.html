@@ -32,33 +32,8 @@
   </header>
 
   <main class="container">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">TABLEAU DE BORD</p>
-        <h1>Semaine du <span id="weekLabel"></span></h1>
-        <p>Confirmez les présences et gérez les changements de créneau.</p>
-      </div>
-      <div class="week-nav">
-        <button id="prevWeek">←</button>
-        <button id="todayWeek">Cette semaine</button>
-        <button id="nextWeek">→</button>
-      </div>
-    </section>
 
-    <section id="stats" class="stats"></section>
-
-    <section class="slot-filter">
-      <div class="filter-title">Filtrer les créneaux</div>
-      <div class="filter-actions">
-        <button class="filter-btn active" data-slot-filter="all">Tous</button>
-        <button class="filter-btn" data-slot-filter="1">Créneau 1</button>
-        <button class="filter-btn" data-slot-filter="2">Créneau 2</button>
-        <button class="filter-btn" data-slot-filter="3">Créneau 3</button>
-      </div>
-      <div class="filter-help">Sélectionnez un ou plusieurs créneaux à afficher.</div>
-    </section>
-
-    <nav class="tabs">
+  <nav class="tabs top-tabs">
       <button class="tab active" data-view="dashboard">Présences</button>
       <button class="tab" data-view="members" id="membersTab">Adhérents</button>
       <button class="tab" data-view="tdb" id="tdbTab">TDB</button>
@@ -84,7 +59,7 @@
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20260911-v83"></script>
+  <script src="app.js?v=20260911-v84"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {})); }</script>
 </body>
 </html>

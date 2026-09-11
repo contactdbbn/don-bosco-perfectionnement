@@ -1,5 +1,5 @@
-const CACHE = "don-bosco-v83";
-const SHELL = ["./", "./index.html", "./styles.css", "./app.js?v=20260911-v83", "./supabase-config.js", "./manifest.json", "./icons/icon-192.png", "./icons/icon-512.png"];
+const CACHE = "don-bosco-v84";
+const SHELL = ["./", "./index.html", "./styles.css", "./app.js?v=20260911-v84", "./supabase-config.js", "./manifest.json", "./icons/icon-192.png", "./icons/icon-512.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });

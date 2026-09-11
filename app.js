@@ -217,7 +217,6 @@ const setStatus=(id,status)=>setStatusForWeek(id,status,weekKey());
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 
 function render(){
- document.getElementById("weekLabel").textContent=fmt(weekKey());
  const memberTab=document.querySelector('.tab[data-view="members"]');
  const moveTab=document.querySelector('.tab[data-view="moves"]');
  memberTab.style.display=canCoach()?"":"none";
@@ -225,18 +224,7 @@ function render(){
  if(!canCoach() && !document.getElementById("membersView").classList.contains("hidden")){
    document.querySelector('.tab[data-view="dashboard"]').click();
  }
- const active=db.members.filter(m=>m.active);
- const stats=SLOT_NAMES.map((n,i)=>{
-   const slot=i+1, p=getControlPresence(slot);
-   const pendingTarget=db.moves.filter(m=>m.status==='pending'&&Number(m.to)===slot).length;
-   return `<div class="stat"><div class="num">${p}/20</div><div class="label">${n} · ${Math.max(0,20-p)} place(s) disponible(s) pour changement</div><div class="muted">${pendingTarget} demande${pendingTarget>1?'s':''} de changement vers ce créneau</div></div>`;
- }).join("");
- document.getElementById("stats").innerHTML=stats;
  document.getElementById("moveBadge").textContent=(db.moves.filter(m=>m.status==="pending").length+(db.statusRequests||[]).filter(m=>m.status==="pending").length)||"";
- document.querySelectorAll(".filter-btn").forEach(btn=>{
-   const n=btn.dataset.slotFilter;
-   btn.classList.toggle("active", n==="all" ? selectedSlots.size===0 : selectedSlots.has(Number(n)));
- });
  renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); syncTabs();
 }
 function hideMemberLogin(){ const box=document.getElementById("memberLogin"); if(box) box.classList.add("hidden"); }
@@ -334,6 +322,32 @@ function syncRoleSelector(){
  [...rs.options].forEach(o=>{ o.disabled=(o.value!=="member" && authState!==o.value && authState!=="admin"); });
 }
 function renderDashboard(){
+ const weekHero=`<section class="hero">
+   <div>
+     <p class="eyebrow">PRÉSENCES</p>
+     <h1>Semaine du <span id="weekLabel"></span></h1>
+     <p>Confirmez les présences et gérez les changements de créneau.</p>
+   </div>
+   <div class="week-nav">
+     <button id="prevWeek">←</button>
+     <button id="todayWeek">Cette semaine</button>
+     <button id="nextWeek">→</button>
+   </div>
+ </section>`;
+ const stats=SLOT_NAMES.map((n,i)=>{
+   const slot=i+1, p=getControlPresence(slot);
+   const pendingTarget=db.moves.filter(m=>m.status==='pending'&&Number(m.to)===slot).length;
+   return `<div class="stat"><div class="num">${p}/20</div><div class="label">${n} · ${Math.max(0,20-p)} place(s) disponible(s) pour changement</div><div class="muted">${pendingTarget} demande${pendingTarget>1?'s':''} de changement vers ce créneau</div></div>`;
+ }).join("");
+ const presenceStats=`<section id="stats" class="stats">${stats}</section>`;
+ const filter=`<section class="slot-filter">
+   <div class="filter-title">Filtrer les créneaux</div>
+   <div class="filter-actions">
+     <button class="filter-btn ${selectedSlots.size===0?'active':''}" data-slot-filter="all">Tous</button>
+     ${SLOT_NAMES.map((name,i)=>{const n=i+1;return `<button class="filter-btn ${selectedSlots.has(n)?'active':''}" data-slot-filter="${n}">${name}</button>`;}).join("")}
+   </div>
+   <div class="filter-help">Sélectionnez un ou plusieurs créneaux à afficher.</div>
+ </section>`;
  const note=`<div class="card role-note">
    <div class="row"><div><strong>${canAdmin()?"Mode administrateur":(canCoach()?"Mode encadrant":"Mode adhérent")}</strong>
    <div class="muted">${canCoach()
@@ -357,7 +371,17 @@ function renderDashboard(){
  }).join("");
 
  const adminDashboard = currentRole === "admin" ? renderRealDashboard() : "";
- document.getElementById("dashboardView").innerHTML=note+absenceCard+adminDashboard+slots;
+ document.getElementById("dashboardView").innerHTML=weekHero+presenceStats+filter+note+absenceCard+adminDashboard+slots;
+ document.getElementById("weekLabel").textContent=fmt(weekKey());
+ document.getElementById("prevWeek").onclick=()=>{weekOffset--;render()};
+ document.getElementById("nextWeek").onclick=()=>{weekOffset++;render()};
+ document.getElementById("todayWeek").onclick=()=>{weekOffset=0;render()};
+ document.querySelectorAll("#dashboardView .filter-btn").forEach(btn=>btn.addEventListener("click",()=>{
+   const n=btn.dataset.slotFilter;
+   if(n==="all") selectedSlots.clear();
+   else { const num=Number(n); if(selectedSlots.has(num)) selectedSlots.delete(num); else selectedSlots.add(num); }
+   render();
+ }));
 
 }
 function renderRealDashboard(){
@@ -1268,9 +1292,6 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
  if(b.dataset.view==="tdb")renderTdb();
  if(b.dataset.view==="objectives")renderObjectives();
 });
-document.getElementById("prevWeek").onclick=()=>{weekOffset--;render()};
-document.getElementById("nextWeek").onclick=()=>{weekOffset++;render()};
-document.getElementById("todayWeek").onclick=()=>{weekOffset=0;render()};
 document.getElementById("notifyBtn").onclick=async()=>{if(!("Notification" in window))return toast("Notifications non supportées par ce navigateur."); const p=await Notification.requestPermission();toast(p==="granted"?"Notifications activées":"Notifications non activées")};
 function toast(t){const x=document.getElementById("toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2500)}
 
@@ -1300,15 +1321,6 @@ function switchMode(mode){
 roleSelect.onchange=()=>switchMode(roleSelect.value);
 syncRoleSelector();
 
-document.querySelectorAll(".filter-btn").forEach(btn=>btn.addEventListener("click",()=>{
- const n=btn.dataset.slotFilter;
- if(n==="all") selectedSlots.clear();
- else {
-   const num=Number(n);
-   if(selectedSlots.has(num)) selectedSlots.delete(num); else selectedSlots.add(num);
- }
- render();
-}));
 
 if(memberLoggedIn && currentMember()){
  currentRole=getMemberRole(currentMember()); authState=currentRole; render(); syncRoleSelector();
