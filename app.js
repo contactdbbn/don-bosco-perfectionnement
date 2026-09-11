@@ -100,6 +100,7 @@ const ROLE_LABELS={member:"Adhérent",coach:"Encadrant",admin:"Administrateur"};
 let authState=localStorage.getItem("sportclub-auth-role") || "";
 let staffLoggedIn=localStorage.getItem("sportclub-staff-auth") === "1";
 let adminRequestFilter=localStorage.getItem("sportclub-admin-request-filter") || "pending";
+let tdbPeriodFilter=localStorage.getItem("sportclub-tdb-period-filter") || "all";
 let appUsers=readStorageJson("sportclub-users-v1",null)||{
   admin:{username:"admin",password:"admin1234",role:"admin"},
   encadrant:{username:"encadrant",password:"1234",role:"coach"}
@@ -920,11 +921,37 @@ function renderActualAttendanceCard(){
  return `<div class="card actual-attendance-card"><div class="row"><div><h2>Présence réelle</h2><div class="muted">Saisissez le nombre réel de personnes présentes pour chaque créneau, selon la semaine du calendrier.</div></div></div><div class="actual-grid">${actualCards}</div><div class="muted actual-help">Jauge de 0 à 30 personnes. ${courseWeek?"La valeur est enregistrée pour la semaine affichée.":"Cette semaine n'est ni une semaine Cours ni une semaine Libre : aucune présence n'est demandée."}</div></div>`;
 }
 
+function getTdbFilteredHistory(history){
+ const p=getCalendarPeriod();
+ if(tdbPeriodFilter==='all') return history.filter(h=>h.week>=p.start&&h.week<=p.end);
+ const end=new Date(p.end+"T12:00:00");
+ const months=Number(tdbPeriodFilter)||0;
+ const start=new Date(end); start.setMonth(start.getMonth()-months);
+ const startKey=isoDate(start);
+ return history.filter(h=>h.week>=startKey&&h.week<=p.end);
+}
+function renderTdbCounters(history){
+ const filtered=getTdbFilteredHistory(history);
+ const totals=SLOT_NAMES.map((name,i)=>{
+   const slot=i+1;
+   const values=filtered.map(h=>Number(h[slot]||0));
+   const total=values.reduce((a,b)=>a+b,0);
+   const avg=values.length?Math.round(total/values.length):0;
+   return `<div class="stat"><div class="num">${total}</div><div class="label">${name} · présences réelles cumulées</div><div class="muted">${values.length?`Moyenne : ${avg} par séance`:'Aucune donnée sur la période'}</div></div>`;
+ }).join('');
+ const grand=filtered.reduce((sum,h)=>sum+SLOT_NAMES.reduce((a,_,i)=>a+Number(h[i+1]||0),0),0);
+ return `<section class="stats tdb-stats"><div class="stat"><div class="num">${grand}</div><div class="label">Total des présences réelles</div><div class="muted">Sur ${filtered.length} semaine${filtered.length>1?'s':''} enregistrée${filtered.length>1?'s':''}</div></div>${totals}</section>`;
+}
 function renderTdb(){
  if(!canCoach()){ document.getElementById("tdbView").innerHTML=""; return; }
  const history=getActualAttendanceHistory();
- document.getElementById("tdbView").innerHTML=`<div class="card"><div class="row"><div><p class="eyebrow">TABLEAU DE BORD</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${renderAttendanceEvolution(history)}</div>${renderActualAttendanceCard()}`;
+ const filteredHistory=getTdbFilteredHistory(history);
+ const options=[['all','Toute la période'],['3','3 derniers mois'],['6','6 derniers mois'],['12','12 derniers mois']];
+ const period=getCalendarPeriod();
+ const toolbar=`<section class="slot-filter tdb-period-filter"><div class="filter-title">Filtrer la période</div><div class="filter-actions">${options.map(([v,l])=>`<button class="filter-btn ${tdbPeriodFilter===v?'active':''}" onclick="setTdbPeriodFilter('${v}')">${l}</button>`).join('')}</div><div class="filter-help">Période du calendrier : ${fmt(period.start)} au ${fmt(period.end)}.</div></section>`;
+ document.getElementById("tdbView").innerHTML=`<div class="card"><div class="row"><div><p class="eyebrow">TABLEAU DE BORD</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${toolbar}${renderTdbCounters(history)}${renderAttendanceEvolution(filteredHistory)}</div>${renderActualAttendanceCard()}`;
 }
+function setTdbPeriodFilter(value){ tdbPeriodFilter=String(value||'all'); localStorage.setItem("sportclub-tdb-period-filter",tdbPeriodFilter); renderTdb(); }
 
 function renderMembers(){
  if(!canAdmin()){ document.getElementById("membersView").innerHTML=""; return; }
