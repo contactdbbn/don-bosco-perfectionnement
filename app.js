@@ -913,12 +913,15 @@ function editWeek(key){
 
 function renderActualAttendanceCard(){
  const courseWeek=isAttendanceWeek();
- const visibleSlots=selectedSlots.size?[...selectedSlots].sort((a,b)=>a-b):[1,2,3];
- const actualCards=visibleSlots.map(slot=>{
-   const name=SLOT_NAMES[slot-1], value=getActualAttendance(slot);
+ const actualCards=SLOT_NAMES.map((name,i)=>{
+   const slot=i+1, value=getActualAttendance(slot);
    return `<div class="actual-slot"><div class="row"><div><strong>${name}</strong><div class="muted">Nombre réellement constaté</div></div><output id="actualValue${slot}" class="actual-value">${value}</output></div><input class="actual-range" type="range" min="0" max="30" step="1" value="${value}" ${courseWeek?"":"disabled"} oninput="document.getElementById('actualValue${slot}').value=this.value" onchange="setActualAttendance(${slot},this.value)" aria-label="Nombre réel de personnes présentes au ${esc(name)}"><div class="range-scale"><span>0</span><span>15</span><span>30</span></div></div>`;
  }).join("");
- return `<div class="card actual-attendance-card"><div class="row"><div><h2>Présence réelle</h2><div class="muted">Saisissez le nombre réel de personnes présentes pour chaque créneau, selon la semaine du calendrier.</div></div></div><div class="actual-grid">${actualCards}</div><div class="muted actual-help">Jauge de 0 à 30 personnes. ${courseWeek?"La valeur est enregistrée pour la semaine affichée.":"Cette semaine n'est ni une semaine Cours ni une semaine Libre : aucune présence n'est demandée."}</div></div>`;
+ const weekHero=`<section class="hero tdb-week-hero">
+   <div><p class="eyebrow">TABLEAU DE BORD</p><h1>Saisie des présences réelles · <span id="tdbWeekLabel"></span></h1><p>Enregistrez rapidement le nombre réellement présent pour les 3 créneaux.</p></div>
+   <div class="week-nav"><button id="tdbPrevWeek">←</button><button id="tdbTodayWeek">Cette semaine</button><button id="tdbNextWeek">→</button></div>
+ </section>`;
+ return `${weekHero}<div class="card actual-attendance-card"><div class="row"><div><h2>Présence réelle</h2><div class="muted">Saisissez le nombre réel de personnes présentes pour chaque créneau, selon la semaine affichée.</div></div></div><div class="actual-grid">${actualCards}</div><div class="muted actual-help">Jauge de 0 à 30 personnes. ${courseWeek?"La valeur est enregistrée pour la semaine affichée.":"Cette semaine n'est ni une semaine Cours ni une semaine Libre : aucune présence n'est demandée."}</div></div>`;
 }
 
 function getTdbFilteredHistory(history){
@@ -948,8 +951,13 @@ function renderTdb(){
  const filteredHistory=getTdbFilteredHistory(history);
  const options=[['all','Toute la période'],['3','3 derniers mois'],['6','6 derniers mois'],['12','12 derniers mois']];
  const period=getCalendarPeriod();
- const toolbar=`<section class="slot-filter tdb-period-filter"><div class="filter-title">Filtrer la période</div><div class="filter-actions">${options.map(([v,l])=>`<button class="filter-btn ${tdbPeriodFilter===v?'active':''}" onclick="setTdbPeriodFilter('${v}')">${l}</button>`).join('')}</div><div class="filter-help">Période du calendrier : ${fmt(period.start)} au ${fmt(period.end)}.</div></section>`;
- document.getElementById("tdbView").innerHTML=`<div class="card"><div class="row"><div><p class="eyebrow">TABLEAU DE BORD</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${toolbar}${renderTdbCounters(history)}${renderAttendanceEvolution(filteredHistory)}</div>${renderActualAttendanceCard()}`;
+ const toolbar=`<section class="slot-filter tdb-period-filter"><div class="filter-title">Filtrer la période du graphique et des compteurs</div><div class="filter-actions">${options.map(([v,l])=>`<button class="filter-btn ${tdbPeriodFilter===v?'active':''}" onclick="setTdbPeriodFilter('${v}')">${l}</button>`).join('')}</div><div class="filter-help">Période du calendrier : ${fmt(period.start)} au ${fmt(period.end)}.</div></section>`;
+ const graphCard=`<div class="card"><div class="row"><div><p class="eyebrow">ÉVOLUTION</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${renderAttendanceEvolution(filteredHistory)}${toolbar}${renderTdbCounters(history)}</div>`;
+ document.getElementById("tdbView").innerHTML=`${renderActualAttendanceCard()}${graphCard}`;
+ document.getElementById("tdbWeekLabel").textContent=fmt(weekKey());
+ document.getElementById("tdbPrevWeek").onclick=()=>{weekOffset--;render()};
+ document.getElementById("tdbNextWeek").onclick=()=>{weekOffset++;render()};
+ document.getElementById("tdbTodayWeek").onclick=()=>{weekOffset=0;render()};
 }
 function setTdbPeriodFilter(value){ tdbPeriodFilter=String(value||'all'); localStorage.setItem("sportclub-tdb-period-filter",tdbPeriodFilter); renderTdb(); }
 
