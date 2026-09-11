@@ -320,7 +320,7 @@ performLogin=async function(){
  }
 };
 function loginMember(){performLogin();}
-function logoutMember(){ memberLoggedIn=false; staffLoggedIn=false; authState=''; currentRole='member'; localStorage.removeItem('sportclub-member-auth'); localStorage.removeItem('sportclub-staff-auth'); localStorage.removeItem('sportclub-auth-role'); localStorage.setItem('sportclub-role','member'); closeProfileMenu(); showMemberLogin(); render(); }
+async function logoutMember(){ const sb=v53Client(); try{if(sb) await sb.auth.signOut({scope:'local'});}catch(e){console.warn(e);} memberLoggedIn=false; staffLoggedIn=false; authState=''; currentRole='member'; window.supabaseSession=null; v53ResetLocalAuth(); if(window.v53){v53.hydrated=false;v53.role=null;v53.memberId=null;v53.displayName='';v53.mustChangePassword=false;} localStorage.removeItem('sportclub-member-auth'); localStorage.removeItem('sportclub-staff-auth'); localStorage.removeItem('sportclub-auth-role'); localStorage.setItem('sportclub-role','member'); closeProfileMenu(); syncRoleSelector(); showMemberLogin(); render(); }
 
 function getCurrentProfile(){
  const m=currentMember();
@@ -1690,12 +1690,7 @@ save=function(){ const ok=v53LocalSave(); v53QueueSync(); return ok; };
 const v53LocalSaveCalendar=saveCalendar;
 saveCalendar=function(){ const ok=v53LocalSaveCalendar(); v53QueueSync(); return ok; };
 
-function v53LoginOverlay(message="Connectez-vous avec votre compte sécurisé."){
-  let box=document.getElementById('memberLogin');
-  if(!box){box=document.createElement('div');box.id='memberLogin';document.body.appendChild(box);}
-  box.innerHTML=`<div class="login-card"><p class="eyebrow">DON BOSCO - PERFECTIONNEMENT</p><h2>Connexion</h2><p class="muted">${esc(message)}</p><label>Email<input id="loginEmail" type="email" autocomplete="username" placeholder="prenom.nom@exemple.fr"></label><label>Mot de passe<input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe"></label><button class="primary" onclick="performLogin()">Se connecter</button><div class="login-help">Les comptes sont gérés par Supabase Auth. Aucun mot de passe n'est stocké dans l'application.</div></div>`;
-  box.classList.remove('hidden');
-}
+function v53LoginOverlay(message="Connectez-vous à votre espace Don Bosco - Perfectionnement."){ showMemberLogin(message); }
 
 function v55PromptPasswordChange(force=false){
   let modal=document.getElementById('passwordModal');
@@ -1705,29 +1700,6 @@ function v55PromptPasswordChange(force=false){
   if(force) modal.dataset.forced='true'; else delete modal.dataset.forced;
   setTimeout(()=>document.getElementById('newPassword')?.focus(),0);
 }
-
-performLogin=async function(){
-  const sb=v53Client();
-  if(!sb) return toast('Supabase n’est pas disponible.');
-  const email=String(document.getElementById('loginEmail')?.value||'').trim();
-  const password=String(document.getElementById('loginPassword')?.value||'');
-  if(!email||!password) return toast('Saisissez votre email et votre mot de passe.');
-  const {data,error}=await sb.auth.signInWithPassword({email,password});
-  if(error) return v53ToastError('Connexion refusée.',error);
-  window.supabaseSession=data.session;
-  try{ await v53LoadRemote(); hideMemberLogin(); syncRoleSelector(); render(); toast('Connexion réussie'); if(v53.mustChangePassword || password==='123456') { if(password==='123456') v53.mustChangePassword=true; setTimeout(()=>v55PromptPasswordChange(true),150); } }
-  catch(e){
-    await sb.auth.signOut({scope:'local'}); v53ResetLocalAuth();
-    if(e?.code==='V68_FORCE_LOGOUT'){ v53LoginOverlay('Cette session a été déconnectée par un administrateur. Reconnectez-vous pour continuer.'); toast('Session déconnectée par un administrateur.'); }
-    else { v53ToastError('Compte non configuré.',e); v53LoginOverlay(); }
-  }
-};
-
-logoutMember=async function(){
-  const sb=v53Client();
-  try{if(sb) await sb.auth.signOut();}catch(e){console.warn(e);}
-  v53ResetLocalAuth(); v53.hydrated=false; v53.role=null; v53.memberId=null; v53.displayName=''; closeProfileMenu(); syncRoleSelector(); v53LoginOverlay();
-};
 
 saveOwnPassword=async function(force=false){
   const sb=v53Client(), user=v53User();

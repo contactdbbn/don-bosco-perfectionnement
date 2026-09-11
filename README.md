@@ -1,4 +1,4 @@
-# Don Bosco - Perfectionnement — V83
+# Don Bosco - Perfectionnement — V88
 
 V83 reprend la V81 et conserve Supabase, GitHub Pages et les Notifications Push.
 
@@ -31,3 +31,9 @@ Le cron Supabase existant toutes les 5 minutes reste inchangé.
 - Première connexion : confirmation par adresse mail paramétrée (3 premiers + 3 derniers caractères affichés, milieu masqué), puis changement obligatoire du mot de passe.
 - Connexions suivantes : sélection du nom puis saisie du mot de passe personnel.
 - Nouvelle Edge Function `auth-gateway` pour charger l’annuaire de connexion et authentifier sans exposer les adresses mail complètes dans le navigateur.
+
+## V88 — Correction connexion
+- Suppression de l'ancienne définition de `performLogin` qui écrasait la nouvelle connexion V87.
+- L'ancien `v53LoginOverlay` redirige désormais vers la nouvelle page de connexion.
+- La déconnexion locale et Supabase ramène systématiquement vers la nouvelle page.
+- Cache Service Worker et version de l'application passés en V88.
