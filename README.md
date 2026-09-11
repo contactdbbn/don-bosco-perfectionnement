@@ -1,3 +1,5 @@
+V89 — correction de la confirmation email côté Auth : les comptes créés par l’administrateur sont confirmés côté serveur avant authentification.
+
 # Don Bosco - Perfectionnement — V88
 
 V83 reprend la V81 et conserve Supabase, GitHub Pages et les Notifications Push.

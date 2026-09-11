@@ -77,6 +77,18 @@ async function login(body: any) {
     return json({ ok: false, error: 'L’adresse email ne correspond pas à celle paramétrée pour ce compte.' }, 401)
   }
 
+  // Les comptes sont créés par l'administrateur dans Supabase Auth : ils ne
+  // doivent pas dépendre d'un email de confirmation envoyé par Supabase.
+  // On s'assure côté serveur que l'utilisateur Auth est confirmé avant le login.
+  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (usersRes.error) throw usersRes.error
+  const authUser = (usersRes.data?.users || []).find((u: any) => normalizeEmail(u.email) === configuredEmail)
+  if (!authUser) return json({ ok: false, error: 'Compte Auth introuvable pour cette adresse email.' }, 403)
+  if (!authUser.email_confirmed_at) {
+    const confirmed = await admin.auth.admin.updateUserById(authUser.id, { email_confirm: true })
+    if (confirmed.error) throw confirmed.error
+  }
+
   const auth = await authClient.auth.signInWithPassword({ email: configuredEmail, password })
   if (auth.error || !auth.data?.session) return json({ ok: false, error: auth.error?.message || 'Mot de passe incorrect.' }, 401)
   return json({ ok: true, session: auth.data.session, user: auth.data.user, first_login: !!profile.must_change_password })
