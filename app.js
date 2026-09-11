@@ -229,42 +229,99 @@ function render(){
  renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); syncTabs();
 }
 function hideMemberLogin(){ const box=document.getElementById("memberLogin"); if(box) box.classList.add("hidden"); }
-function showMemberLogin(){
- window.loginSlotFilter="all";
- const active=db.members.filter(m=>m.active);
- let box=document.getElementById("memberLogin");
- if(!box){ box=document.createElement("div"); box.id="memberLogin"; document.body.appendChild(box); }
- box.innerHTML=`<div class="login-card"><p class="eyebrow">SPORTCLUB</p><h2>Connexion</h2><p class="muted">Choisissez votre compte et saisissez votre code d'accès.</p><label>Compte<select id="loginAccount" onchange="renderLoginFields()"><option value="member">Adhérent</option><option value="admin">Administrateur</option><option value="coach">Encadrant</option></select></label><div id="loginFields"></div><button class="primary" onclick="performLogin()">Se connecter</button><div class="login-help">Comptes initiaux : <strong>admin</strong> / <strong>admin1234</strong> · <strong>encadrant</strong> / <strong>1234</strong> · adhérents : code <strong>1234</strong>.</div></div>`;
- box.classList.remove("hidden"); renderLoginFields();
+let v87LoginDirectory=[];
+let v87LoginMode='member';
+let v87LoginSlot='all';
+let v87LoginProfileId='';
+
+function v87RoleLabel(role){ return role==='admin'?'Administrateur':role==='coach'?'Encadrant':'Adhérent'; }
+function v87MaskEmail(email){
+ const e=String(email||'').trim();
+ if(!e) return '';
+ return e.length<=6 ? `${e.slice(0,3)}•••` : `${e.slice(0,3)}••••••${e.slice(-3)}`;
+}
+function v87LoginGateway(){ return `${window.SUPABASE_CONFIG?.url||''}/functions/v1/auth-gateway`; }
+async function v87FetchLoginDirectory(){
+ const url=v87LoginGateway();
+ if(!url || url.endsWith('/')) throw new Error('Configuration Supabase absente.');
+ const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','apikey':window.SUPABASE_CONFIG.publishableKey},body:JSON.stringify({action:'directory'})});
+ const result=await response.json().catch(()=>null);
+ if(!response.ok || !result?.ok) throw new Error(result?.error||'Impossible de charger la liste des comptes.');
+ v87LoginDirectory=Array.isArray(result.items)?result.items:[];
+ return v87LoginDirectory;
+}
+function v87LoginItem(){ return v87LoginDirectory.find(x=>String(x.profile_id)===String(v87LoginProfileId))||null; }
+function v87FilteredLoginItems(){
+ let items=v87LoginDirectory.filter(x=>x.role===v87LoginMode);
+ if(v87LoginMode==='member' && v87LoginSlot!=='all') items=items.filter(x=>Number(x.slot)===Number(v87LoginSlot));
+ return items;
+}
+function v87SelectMode(value){
+ v87LoginMode=String(value||'member');
+ v87LoginProfileId='';
+ v87LoginSlot='all';
+ renderLoginFields();
+}
+function v87SelectSlot(value){
+ v87LoginSlot=String(value||'all');
+ v87LoginProfileId='';
+ renderLoginFields();
+}
+function v87SelectProfile(value){ v87LoginProfileId=String(value||''); renderLoginFields(); }
+
+function showMemberLogin(message='Connectez-vous à votre espace Don Bosco - Perfectionnement.'){
+ let box=document.getElementById('memberLogin');
+ if(!box){ box=document.createElement('div'); box.id='memberLogin'; document.body.appendChild(box); }
+ box.innerHTML=`<div class="login-card login-card-v87"><p class="eyebrow">DON BOSCO - PERFECTIONNEMENT</p><h2>Connexion</h2><p class="muted">${esc(message)}</p><div id="loginFields"><div class="muted">Chargement des comptes…</div></div><button class="primary" onclick="performLogin()">Se connecter</button><div class="login-help">À la première connexion, vous confirmerez votre identité avec l’adresse mail paramétrée puis vous choisirez votre mot de passe personnel. Aux connexions suivantes, le nom et le mot de passe suffisent.</div></div>`;
+ box.classList.remove('hidden');
+ v87FetchLoginDirectory().then(()=>renderLoginFields()).catch(e=>{console.error(e);document.getElementById('loginFields').innerHTML='<div class="muted">Impossible de charger les comptes.</div>';toast(e.message||'Erreur de connexion.');});
 }
 function renderLoginFields(){
- const type=document.getElementById("loginAccount")?.value||"member", target=document.getElementById("loginFields"); if(!target)return;
- if(type==="member"){
-   const active=db.members.filter(m=>m.active);
-   const loginSlot=window.loginSlotFilter||"all";
-   const filtered=loginSlot==="all"?active:active.filter(m=>Number(m.slot)===Number(loginSlot));
-   target.innerHTML=`<label>Créneau<select id="loginSlotFilter" onchange="window.loginSlotFilter=this.value;renderLoginFields()"><option value="all" ${loginSlot==="all"?"selected":""}>Tous les adhérents</option><option value="1" ${loginSlot==="1"?"selected":""}>Créneau 1</option><option value="2" ${loginSlot==="2"?"selected":""}>Créneau 2</option><option value="3" ${loginSlot==="3"?"selected":""}>Créneau 3</option></select></label><label>Adhérent<select id="loginMember">${filtered.map(m=>`<option value="${m.id}" ${m.id===currentMemberId?"selected":""}>${esc(m.name)}</option>`).join("")}</select></label><label>Code d'accès<input id="loginPassword" type="password" placeholder="Code d'accès" autocomplete="current-password"></label>`;
- } else {
-   target.innerHTML=`<label>Identifiant<input id="loginUsername" value="${type==="admin"?"admin":"encadrant"}" autocomplete="username"></label><label>Code d'accès<input id="loginPassword" type="password" placeholder="Code d'accès" autocomplete="current-password"></label>`;
- }
+ const target=document.getElementById('loginFields'); if(!target)return;
+ const items=v87FilteredLoginItems();
+ const selected=v87LoginItem();
+ if(selected && !items.some(x=>String(x.profile_id)===String(selected.profile_id))) v87LoginProfileId='';
+ const profile=v87LoginItem();
+ const first=!!profile?.first_login;
+ target.innerHTML=`
+   <div class="login-step"><div class="login-step-title">1 · Mode</div><label>Mode<select id="loginMode" onchange="v87SelectMode(this.value)"><option value="member" ${v87LoginMode==='member'?'selected':''}>Adhérent</option><option value="coach" ${v87LoginMode==='coach'?'selected':''}>Encadrant</option><option value="admin" ${v87LoginMode==='admin'?'selected':''}>Administrateur</option></select></label></div>
+   ${v87LoginMode==='member'?`<div class="login-step"><div class="login-step-title">2 · Créneau</div><label>Créneau<select id="loginSlot" onchange="v87SelectSlot(this.value)"><option value="all" ${v87LoginSlot==='all'?'selected':''}>Tous les créneaux</option><option value="1" ${v87LoginSlot==='1'?'selected':''}>Créneau 1</option><option value="2" ${v87LoginSlot==='2'?'selected':''}>Créneau 2</option><option value="3" ${v87LoginSlot==='3'?'selected':''}>Créneau 3</option></select></label></div>`:''}
+   <div class="login-step"><div class="login-step-title">${v87LoginMode==='member'?'3':'2'} · Liste ${v87LoginMode==='member'?'des adhérents':'des comptes'}</div><label>${v87LoginMode==='member'?'Adhérent':'Compte'}<select id="loginProfile" onchange="v87SelectProfile(this.value)"><option value="">Sélectionnez votre nom</option>${items.map(x=>`<option value="${esc(String(x.profile_id))}" ${String(x.profile_id)===String(v87LoginProfileId)?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>
+   ${profile?`<div class="login-selected"><strong>${esc(profile.name)}</strong><span class="muted">${esc(v87RoleLabel(profile.role))}${profile.slot?` · Créneau ${profile.slot}`:''}</span></div>`:''}
+   ${profile&&first?`<div class="login-first"><div class="login-first-title">Première connexion</div><p>Pour confirmer que c’est bien votre compte, saisissez l’adresse mail paramétrée :</p><div class="login-email-hint">${esc(profile.masked_email||'Adresse non renseignée')}</div><label>Adresse mail paramétrée<input id="loginEmail" type="email" autocomplete="username" placeholder="votre adresse mail"></label><label>Mot de passe temporaire<input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe temporaire"></label></div>`:`${profile?`<div class="login-returning"><div class="login-returning-title">Connexion habituelle</div><p class="muted">Saisissez votre mot de passe personnel.</p><label>Mot de passe<input id="loginPassword" type="password" autocomplete="current-password" placeholder="Mot de passe"></label></div>`:''}`}
+ `;
 }
-function performLogin(){
- const type=document.getElementById("loginAccount")?.value||"member", pass=String(document.getElementById("loginPassword")?.value||"");
- if(type==="member"){
-   const id=Number(document.getElementById("loginMember")?.value), m=db.members.find(x=>x.id===id&&x.active);
-   if(!m || pass!==String(m.password||"1234")) return toast("Adhérent ou code d'accès incorrect.");
-   currentMemberId=id; currentRole=getMemberRole(m); authState=currentRole; memberLoggedIn=true;
-   localStorage.setItem("sportclub-member-id",String(id)); localStorage.setItem("sportclub-member-auth","1"); localStorage.removeItem("sportclub-staff-auth"); localStorage.setItem("sportclub-role",currentRole); localStorage.setItem("sportclub-auth-role",authState);
- } else {
-   const username=String(document.getElementById("loginUsername")?.value||"").trim().toLowerCase(), u=appUsers[username];
-   if(!u || u.role!==type || pass!==String(u.password)) return toast("Identifiant ou code d'accès incorrect.");
-   currentRole=type; authState=type; memberLoggedIn=false;
-   localStorage.setItem("sportclub-role",type); localStorage.setItem("sportclub-auth-role",type); localStorage.removeItem("sportclub-member-auth");
+
+performLogin=async function(){
+ const sb=v53Client();
+ if(!sb) return toast('Supabase n’est pas disponible.');
+ const profile=v87LoginItem();
+ if(!profile) return toast('Sélectionnez d’abord votre nom.');
+ const password=String(document.getElementById('loginPassword')?.value||'');
+ if(!password) return toast('Saisissez votre mot de passe.');
+ const first=!!profile.first_login;
+ const email=String(document.getElementById('loginEmail')?.value||'').trim();
+ if(first && !email) return toast('Saisissez l’adresse mail paramétrée.');
+ const response=await fetch(v87LoginGateway(),{method:'POST',headers:{'Content-Type':'application/json','apikey':window.SUPABASE_CONFIG.publishableKey},body:JSON.stringify({action:'login',profile_id:profile.profile_id,mode:profile.role,password,email,first_connection:first})});
+ const result=await response.json().catch(()=>null);
+ if(!response.ok || !result?.ok) return toast(result?.error||'Connexion refusée.');
+ try{
+   const set=await sb.auth.setSession({access_token:result.session.access_token,refresh_token:result.session.refresh_token});
+   if(set.error) throw set.error;
+   window.supabaseSession=set.data?.session||result.session;
+   await v53LoadRemote();
+   hideMemberLogin(); syncRoleSelector(); render(); toast('Connexion réussie');
+   if(v53.mustChangePassword || first){ if(first) v53.mustChangePassword=true; setTimeout(()=>v55PromptPasswordChange(true),150); }
+ }catch(e){
+   try{await sb.auth.signOut({scope:'local'});}catch{}
+   v53ResetLocalAuth();
+   if(e?.code==='V68_FORCE_LOGOUT'){ showMemberLogin('Cette session a été déconnectée par un administrateur. Reconnectez-vous pour continuer.'); toast('Session déconnectée par un administrateur.'); }
+   else { v53ToastError('Compte non configuré.',e); showMemberLogin(); }
  }
- hideMemberLogin(); syncRoleSelector(); render(); toast("Connexion réussie");
-}
+};
 function loginMember(){performLogin();}
-function logoutMember(){ memberLoggedIn=false; staffLoggedIn=false; authState=""; currentRole="member"; localStorage.removeItem("sportclub-member-auth"); localStorage.removeItem("sportclub-staff-auth"); localStorage.removeItem("sportclub-auth-role"); localStorage.setItem("sportclub-role","member"); closeProfileMenu(); syncRoleSelector(); showMemberLogin(); render(); }
+function logoutMember(){ memberLoggedIn=false; staffLoggedIn=false; authState=''; currentRole='member'; localStorage.removeItem('sportclub-member-auth'); localStorage.removeItem('sportclub-staff-auth'); localStorage.removeItem('sportclub-auth-role'); localStorage.setItem('sportclub-role','member'); closeProfileMenu(); showMemberLogin(); render(); }
+
 function getCurrentProfile(){
  const m=currentMember();
  if(memberLoggedIn && m) return {type:"member",name:m.name,role:getMemberRole(m),password:m.password||"1234",ref:m};
