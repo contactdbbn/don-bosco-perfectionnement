@@ -1,6 +1,0 @@
-{
-  "imports": {
-    "@supabase/supabase-js": "npm:@supabase/supabase-js@2",
-    "web-push-browser": "npm:web-push-browser@1.4.2"
-  }
-}

@@ -1,8 +1,8 @@
-# Don Bosco - Perfectionnement — V82
+# Don Bosco - Perfectionnement — V83
 
-V82 reprend la V81 et conserve Supabase, GitHub Pages et les Notifications Push.
+V83 reprend la V81 et conserve Supabase, GitHub Pages et les Notifications Push.
 
-## V82 — Notifications Push : diagnostic et correction
+## V83 — Notifications Push : diagnostic et correction
 
 La fonction Supabase `push-notifications` a été renforcée pour tracer précisément le traitement des notifications :
 - démarrage du dispatch ;

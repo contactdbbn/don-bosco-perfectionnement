@@ -4,5 +4,5 @@
 window.SUPABASE_CONFIG = {
   url: 'https://zshvrarmooukeosyxbgx.supabase.co',
   publishableKey: 'sb_publishable_6J6KrP46EpgzHUQ1U28ohA_GxiHft9V',
-  pushPublicKey: 'BDUggVfBQYbJMoRMpijxX3DixdJFo0NehaxeasvTmZ3DfGDneLCcKQfUGi7OVI_C4J1PQRo7aWGFq8IRA00Hxj4'
+  pushPublicKey: 'BPgemqHLQ3QucWKc51CppPtJkZ0MqVBgm_ubSmocN4-IGpb2ensGUUxJAUWIe1bzIGCYWb0vroEV2JcpNkUXMaA'
 };

@@ -82,7 +82,13 @@ async function sendToProfile(profileId: string, title: string, body: string, dat
         await admin.from('push_subscriptions').update({ active: false }).eq('id', sub.id)
         console.warn(`[push] abonnement désactivé status=${response.status} subscription=${sub.id}`)
       } else {
-        console.warn(`[push] envoi refusé status=${response.status} subscription=${sub.id}`)
+        let detail = ''
+        try { detail = (await response.text()).slice(0, 500) } catch (_) {}
+        console.warn(`[push] envoi refusé status=${response.status} subscription=${sub.id}${detail ? ` detail=${detail}` : ''}`)
+        if (response.status === 403) {
+          await admin.from('push_subscriptions').update({ active: false, updated_at: new Date().toISOString() }).eq('id', sub.id)
+          console.warn(`[push] abonnement désactivé après 403 subscription=${sub.id}; renouvellement requis côté navigateur`)
+        }
       }
     } catch (e) {
       const status = Number((e as any)?.statusCode || (e as any)?.status || 0)
