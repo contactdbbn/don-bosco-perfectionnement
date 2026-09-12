@@ -60,8 +60,15 @@ async function login(body: any) {
   if (!profileId || !password) return json({ ok: false, error: 'Compte ou mot de passe manquant.' }, 400)
   if (!['member', 'coach', 'admin'].includes(mode)) return json({ ok: false, error: 'Mode de connexion invalide.' }, 400)
 
-  const { data: profile, error } = await admin.from('profiles').select('id,member_id,role,active,auth_email,must_change_password').eq('id', profileId).maybeSingle()
+  let { data: profile, error } = await admin.from('profiles').select('id,member_id,role,active,auth_email,must_change_password,display_name').eq('id', profileId).maybeSingle()
   if (error) throw error
+  // Tolérance pour les anciens profils : si l'identifiant de profil n'est pas l'UID Auth,
+  // retrouver le profil par l'adresse email paramétrée puis poursuivre avec l'UID Auth réel.
+  if (!profile && email) {
+    const byEmail = await admin.from('profiles').select('id,member_id,role,active,auth_email,must_change_password,display_name').eq('auth_email', email).maybeSingle()
+    if (byEmail.error) throw byEmail.error
+    profile = byEmail.data
+  }
   if (!profile || profile.active === false || profile.role !== mode) return json({ ok: false, error: 'Compte indisponible.' }, 403)
 
   if (mode === 'member') {
@@ -91,7 +98,7 @@ async function login(body: any) {
 
   const auth = await authClient.auth.signInWithPassword({ email: configuredEmail, password })
   if (auth.error || !auth.data?.session) return json({ ok: false, error: auth.error?.message || 'Mot de passe incorrect.' }, 401)
-  return json({ ok: true, session: auth.data.session, user: auth.data.user, first_login: !!profile.must_change_password })
+  return json({ ok: true, session: auth.data.session, user: auth.data.user, profile_id: profile.id, first_login: !!profile.must_change_password })
 }
 
 Deno.serve(async req => {

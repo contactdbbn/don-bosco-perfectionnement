@@ -316,7 +316,7 @@ performLogin=async function(){
    try{await sb.auth.signOut({scope:'local'});}catch{}
    v53ResetLocalAuth();
    if(e?.code==='V68_FORCE_LOGOUT'){ showMemberLogin('Cette session a été déconnectée par un administrateur. Reconnectez-vous pour continuer.'); toast('Session déconnectée par un administrateur.'); }
-   else { v53ToastError('Compte non configuré.',e); showMemberLogin(); }
+   else { console.error('[V90] échec après authentification:', e); toast(`Connexion impossible : ${e?.message||'erreur technique'}`); showMemberLogin(`La connexion a été refusée : ${e?.message||'erreur technique'}`); }
  }
 };
 function loginMember(){performLogin();}
