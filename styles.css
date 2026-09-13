@@ -286,3 +286,51 @@ img,svg,canvas{max-width:100%;}
 .role-rules span{padding-right:10px;border-right:1px solid var(--line)}
 .role-rules span:last-child{border-right:0}
 @media(max-width:760px){.role-management-head{flex-direction:column}.role-management-badge{align-self:flex-start}.role-rules{display:grid;gap:6px}.role-rules span{padding:0;border-right:0}}
+
+
+/* V93 — Gestion des rôles : tableau pleine largeur, informations toujours visibles */
+.role-grid{
+  display:block;
+  width:100%;
+  overflow-x:auto;
+  margin-top:14px;
+}
+.role-header,.role-item{
+  width:100%;
+  min-width:760px;
+  box-sizing:border-box;
+  display:grid;
+  grid-template-columns:minmax(260px,2fr) minmax(200px,1fr) minmax(200px,1fr);
+  align-items:center;
+  gap:16px;
+}
+.role-header{
+  padding:0 14px 7px;
+}
+.role-item{
+  padding:13px 14px;
+  margin-bottom:8px;
+}
+.role-person,.role-field{min-width:0;}
+.role-person strong{
+  display:block;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.role-field select{min-width:0;}
+.role-slot-value{white-space:normal;overflow:visible;text-overflow:clip;}
+@media(max-width:760px){
+  .role-header{display:none;}
+  .role-item{
+    width:100%;
+    min-width:0;
+    grid-template-columns:1fr;
+    gap:10px;
+    padding:13px;
+    margin-bottom:10px;
+  }
+  .role-field-label{display:block;}
+}
