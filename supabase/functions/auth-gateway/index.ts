@@ -45,7 +45,7 @@ async function directory() {
       slot: m?.habitual_slot == null ? null : Number(m.habitual_slot),
       role,
       first_login: !!p.must_change_password,
-      masked_email: maskEmail(String(p.auth_email || '')),
+      masked_email: maskEmail(String(p.auth_email || '')), // sera complété côté login si le profil historique n'a pas auth_email
     }
   }).filter(Boolean)
   items.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
@@ -78,8 +78,27 @@ async function login(body: any) {
     if (!member.data || member.data.active === false) return json({ ok: false, error: 'Adhérent inactif.' }, 403)
   }
 
-  const configuredEmail = normalizeEmail(profile.auth_email)
-  if (!configuredEmail) return json({ ok: false, error: 'Adresse email du compte non configurée.' }, 403)
+  // V91 : auth_email devient un champ de confort, pas une dépendance bloquante.
+  // Pour les anciens profils, on récupère l'email directement depuis Supabase Auth
+  // à partir de l'UID du profil, puis on le réécrit dans public.profiles.
+  let configuredEmail = normalizeEmail(profile.auth_email)
+  let authUser: any = null
+  if (profile.id) {
+    const byId = await admin.auth.admin.getUserById(String(profile.id))
+    if (!byId.error && byId.data?.user) authUser = byId.data.user
+  }
+  if (!authUser && configuredEmail) {
+    const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    if (usersRes.error) throw usersRes.error
+    authUser = (usersRes.data?.users || []).find((u: any) => normalizeEmail(u.email) === configuredEmail) || null
+  }
+  const authEmail = normalizeEmail(authUser?.email)
+  if (!configuredEmail && authEmail) {
+    configuredEmail = authEmail
+    const repaired = await admin.from('profiles').update({ auth_email: configuredEmail }).eq('id', profile.id)
+    if (repaired.error) console.warn('[V91] impossible de renseigner auth_email:', repaired.error.message)
+  }
+  if (!configuredEmail) return json({ ok: false, error: 'Compte Auth introuvable ou adresse email non configurée.' }, 403)
   if (body?.first_connection === true && email !== configuredEmail) {
     return json({ ok: false, error: 'L’adresse email ne correspond pas à celle paramétrée pour ce compte.' }, 401)
   }
@@ -87,9 +106,11 @@ async function login(body: any) {
   // Les comptes sont créés par l'administrateur dans Supabase Auth : ils ne
   // doivent pas dépendre d'un email de confirmation envoyé par Supabase.
   // On s'assure côté serveur que l'utilisateur Auth est confirmé avant le login.
-  const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (usersRes.error) throw usersRes.error
-  const authUser = (usersRes.data?.users || []).find((u: any) => normalizeEmail(u.email) === configuredEmail)
+  if (!authUser) {
+    const usersRes = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    if (usersRes.error) throw usersRes.error
+    authUser = (usersRes.data?.users || []).find((u: any) => normalizeEmail(u.email) === configuredEmail) || null
+  }
   if (!authUser) return json({ ok: false, error: 'Compte Auth introuvable pour cette adresse email.' }, 403)
   if (!authUser.email_confirmed_at) {
     const confirmed = await admin.auth.admin.updateUserById(authUser.id, { email_confirm: true })

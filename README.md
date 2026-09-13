@@ -39,3 +39,6 @@ Le cron Supabase existant toutes les 5 minutes reste inchangé.
 - L'ancien `v53LoginOverlay` redirige désormais vers la nouvelle page de connexion.
 - La déconnexion locale et Supabase ramène systématiquement vers la nouvelle page.
 - Cache Service Worker et version de l'application passés en V88.
+
+
+V91 : réparation automatique de `profiles.auth_email` depuis Supabase Auth pour les anciens comptes, sans bloquer la connexion si ce champ est vide.
