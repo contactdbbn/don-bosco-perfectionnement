@@ -276,3 +276,13 @@ img,svg,canvas{max-width:100%;}
 /* V84 — menu principal en haut, filtres/compteurs réservés à Présences */
 .top-tabs{scrollbar-width:none}.top-tabs::-webkit-scrollbar{display:none}
 @media(max-width:760px){.top-tabs{margin:0;padding:0 14px;gap:2px}.top-tabs .tab{padding:11px 13px}.top-tabs{margin-bottom:18px}}
+
+/* V92 — Gestion des rôles mise en avant */
+.role-management-card{border:2px solid var(--primary);box-shadow:0 8px 24px rgba(15,23,42,.08);margin-bottom:16px;background:#fff}
+.role-management-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.role-management-head h2{margin:3px 0 5px}
+.role-management-badge{flex:0 0 auto;padding:8px 12px;border-radius:999px;background:#eef2ff;color:var(--primary);font-weight:800;font-size:12px;white-space:nowrap}
+.role-rules{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+.role-rules span{padding-right:10px;border-right:1px solid var(--line)}
+.role-rules span:last-child{border-right:0}
+@media(max-width:760px){.role-management-head{flex-direction:column}.role-management-badge{align-self:flex-start}.role-rules{display:grid;gap:6px}.role-rules span{padding:0;border-right:0}}
