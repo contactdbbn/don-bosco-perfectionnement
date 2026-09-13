@@ -43,6 +43,7 @@
       <button class="tab" data-view="objectives" id="objectivesTab">Objectifs</button>
       <button class="tab" data-view="moves" id="movesTab">Demandes <span id="moveBadge" class="badge"></span></button>
       <button class="tab" data-view="request-history" id="requestHistoryTab">Mes demandes</button>
+      <button class="tab" data-view="notifications" id="notificationsTab">Notifications</button>
     </nav>
 
     <section id="dashboardView" class="view"></section>
@@ -54,12 +55,13 @@
     <section id="objectivesView" class="view hidden"></section>
     <section id="movesView" class="view hidden"></section>
     <section id="request-historyView" class="view hidden"></section>
+    <section id="notificationsView" class="view hidden"></section>
   </main>
 
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20260913-v94"></script>
+  <script src="app.js?v=20260913-v99"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {})); }</script>
 </body>
 </html>

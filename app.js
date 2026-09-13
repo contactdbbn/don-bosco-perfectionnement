@@ -101,6 +101,15 @@ let authState=localStorage.getItem("sportclub-auth-role") || "";
 let staffLoggedIn=localStorage.getItem("sportclub-staff-auth") === "1";
 let adminRequestFilter=localStorage.getItem("sportclub-admin-request-filter") || "pending";
 let tdbPeriodFilter=localStorage.getItem("sportclub-tdb-period-filter") || "all";
+let notificationSettings = readStorageJson("sportclub-notification-settings", null) || {};
+const DEFAULT_NOTIFICATION_SETTINGS={
+  attendance_reminder:{active:true,days:[0],start:"18:00",end:"18:05"},
+  new_slot_request:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
+  new_status_request:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
+  slot_request_decision:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
+  status_request_decision:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"}
+};
+Object.keys(DEFAULT_NOTIFICATION_SETTINGS).forEach(k=>{if(!notificationSettings[k]) notificationSettings[k]={...DEFAULT_NOTIFICATION_SETTINGS[k]};});
 let appUsers=readStorageJson("sportclub-users-v1",null)||{
   admin:{username:"admin",password:"admin1234",role:"admin"},
   encadrant:{username:"encadrant",password:"1234",role:"coach"}
@@ -226,7 +235,7 @@ function render(){
    document.querySelector('.tab[data-view="dashboard"]').click();
  }
  document.getElementById("moveBadge").textContent=(db.moves.filter(m=>m.status==="pending").length+(db.statusRequests||[]).filter(m=>m.status==="pending").length)||"";
- renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); syncTabs();
+ renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); renderNotifications(); syncTabs();
 }
 function hideMemberLogin(){ const box=document.getElementById("memberLogin"); if(box) box.classList.add("hidden"); }
 let v87LoginDirectory=[];
@@ -1048,6 +1057,38 @@ function memberDirectoryCard(m){
  return `<article class="card member-directory-card-item"><div class="member-directory-main"><div class="member-directory-identity"><strong>${esc(m.name)}</strong><span class="member-role-pill">${esc(roleLabel)}</span></div><div class="member-directory-info"><div><span class="field-label">Rôle</span><strong>${esc(roleLabel)}</strong></div><div><span class="field-label">Créneau habituel</span><strong>${esc(slotText)}</strong></div><div><span class="field-label">Compte adhérent</span><strong>${m.authEmail?"Compte créé":"Compte non créé"}</strong>${m.authEmail?`<span class="muted">${esc(m.authEmail)}</span>`:""}</div><div><span class="field-label">Dernière connexion</span><strong>${esc(login)}</strong>${passwordState?`<span class="muted">${esc(passwordState)}</span>`:""}</div></div></div><div class="member-directory-actions">${accountActions}</div>${canManageRoles()?`<div class="member-directory-settings"><span class="field-label">Modifier le rôle</span><select onchange="setMemberRole(${m.id},this.value)"><option value="member" ${role==='member'?"selected":""}>Adhérent</option><option value="coach" ${role==='coach'?"selected":""}>Encadrant</option><option value="admin" ${role==='admin'?"selected":""}>Administrateur</option></select><span class="field-label">Créneau habituel</span>${role==='admin'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="" ${!m.slot?"selected":""}>Aucun</option><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:role==='member'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:`<span class="muted">Sans créneau</span>`}</div>`:""}</article>`;
 }
 
+function notificationDayName(d){return ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"][Number(d)]||d;}
+const NOTIFICATION_DEFS=[
+ {key:"attendance_reminder",title:"Rappel de présence",desc:"Rappelle aux adhérents de confirmer leur présence pour la semaine suivante."},
+ {key:"new_slot_request",title:"Nouvelle demande de créneau",desc:"Informe les encadrants et administrateurs d’une nouvelle demande de changement de créneau."},
+ {key:"new_status_request",title:"Nouvelle demande de présence",desc:"Informe les encadrants et administrateurs d’une demande de modification de présence."},
+ {key:"slot_request_decision",title:"Décision sur une demande de créneau",desc:"Informe l’adhérent lorsqu’une demande de créneau est validée, refusée ou annulée."},
+ {key:"status_request_decision",title:"Décision sur une demande de présence",desc:"Informe l’adhérent lorsqu’une demande de présence est validée, refusée ou annulée."}
+];
+function saveNotificationSettings(){writeStorageJson("sportclub-notification-settings",notificationSettings);}
+function notificationSetting(key){return notificationSettings[key]||DEFAULT_NOTIFICATION_SETTINGS[key];}
+async function loadNotificationSettings(){
+ if(!canAdmin()) return;
+ const sb=v53Client(); if(!sb||!v53User()) return;
+ try{const {data,error}=await sb.from("notification_settings").select("notification_type,active,days,start_time,end_time"); if(error) throw error; (data||[]).forEach(r=>{notificationSettings[r.notification_type]={active:r.active!==false,days:Array.isArray(r.days)?r.days.map(Number):[],start:String(r.start_time||"07:00").slice(0,5),end:String(r.end_time||"23:00").slice(0,5)};}); saveNotificationSettings();}catch(e){console.warn("[V99] paramètres notifications non chargés",e);}
+}
+function updateNotificationSetting(key,field,value){
+ if(!canAdmin()) return toast("Réservé à l’administrateur.");
+ const s=notificationSetting(key);
+ if(field==="active") s.active=!!value;
+ else if(field==="start"||field==="end") s[field]=String(value||"00:00");
+ else if(field==="days") s.days=Array.isArray(value)?value.map(Number):[];
+ notificationSettings[key]=s; saveNotificationSettings();
+ const sb=v53Client(); if(sb&&v53User()){sb.from("notification_settings").upsert({notification_type:key,active:s.active,days:s.days,start_time:s.start,end_time:s.end,updated_at:new Date().toISOString()},{onConflict:"notification_type"}).then(({error})=>{if(error)toast("Paramètre non enregistré : "+error.message);});}
+ addActionLog("Paramètre notification",`${key} · ${field}`);
+}
+function renderNotifications(){
+ const el=document.getElementById("notificationsView"); if(!el)return;
+ if(!canAdmin()){el.innerHTML="";return;}
+ const cards=NOTIFICATION_DEFS.map(n=>{const s=notificationSetting(n.key);return `<div class="card notification-config-card"><div class="notification-config-head"><div><p class="eyebrow">NOTIFICATION</p><h3>${esc(n.title)}</h3><div class="muted">${esc(n.desc)}</div></div><label class="notification-toggle"><input type="checkbox" ${s.active?"checked":""} onchange="updateNotificationSetting('${n.key}','active',this.checked)"><span>${s.active?"Activée":"Désactivée"}</span></label></div><div class="notification-config-fields"><label>Heure de début<input type="time" value="${esc(s.start)}" onchange="updateNotificationSetting('${n.key}','start',this.value)"></label><label>Heure de fin<input type="time" value="${esc(s.end)}" onchange="updateNotificationSetting('${n.key}','end',this.value)"></label></div><div class="notification-days"><span class="field-label">Jours d’envoi</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" ${s.days.includes(d)?"checked":""} onchange="updateNotificationDays('${n.key}')" data-notif-day="${n.key}" value="${d}">${notificationDayName(d).slice(0,3)}</label>`).join("")}</div></div></div>`}).join("");
+ el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Notifications</h1><p>Activez ou désactivez les notifications Push et définissez les jours et horaires d’envoi.</p></div></section><div class="notification-info card"><strong>Fonctionnement</strong><div class="muted">Les notifications sont envoyées automatiquement par Supabase. Les demandes et décisions sont traitées dans la fenêtre horaire définie ci-dessous.</div></div>${cards}`;
+}
+function updateNotificationDays(key){const vals=[...document.querySelectorAll(`input[data-notif-day="${key}"]:checked`)].map(x=>Number(x.value));updateNotificationSetting(key,"days",vals);}
 function renderAdminTools(){
  if(!canAdmin()) return "";
  const last=db.actionLog?.length?db.actionLog[db.actionLog.length-1]:null; const lastBackup=readStorageJson("sportclub-last-backup",null);
@@ -1383,6 +1424,8 @@ function syncTabs(){
  const tdbTab=document.getElementById("tdbTab");
  if(membersTab) membersTab.style.display=canAdmin()?"":"none";
  if(tdbTab) tdbTab.style.display=canCoach()?"":"none";
+ const notifTab=document.getElementById("notificationsTab");
+ if(notifTab) notifTab.style.display=canAdmin()?"":"none";
  const active=document.querySelector(".tab.active");
  if(active && active.style.display==="none"){ const fallback=canCoach()?tdbTab:document.querySelector(".tab[data-view=\"dashboard\"]"); if(fallback) fallback.click(); }
 }
@@ -1397,6 +1440,7 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
  if(b.dataset.view==="member-history")renderMemberHistory();
  if(b.dataset.view==="tdb")renderTdb();
  if(b.dataset.view==="objectives")renderObjectives();
+ if(b.dataset.view==="notifications")renderNotifications();
 });
 document.getElementById("notifyBtn").onclick=async()=>{if(!("Notification" in window))return toast("Notifications non supportées par ce navigateur."); const p=await Notification.requestPermission();toast(p==="granted"?"Notifications activées":"Notifications non activées")};
 function toast(t){const x=document.getElementById("toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2500)}
@@ -1608,7 +1652,7 @@ async function v53LoadRemote(){
   (rows.calendar_weeks||[]).forEach(w=>{calendarData.weeks[w.week_start]={type:v53MapWeekType(w.week_type),label:w.label||w.week_type,reportDate:w.report_date||null};});
   calendarData.events=(rows.calendar_events||[]).map(e=>({id:Number(e.id),date:e.event_date,eventType:e.event_type,title:e.title,reportDate:e.report_date||null}));
   ensureCalendarCourseMondays();
-  if(profile.role==='admin') await v63LoadAccountStatus();
+  if(profile.role==='admin'){ await v63LoadAccountStatus(); await loadNotificationSettings(); }
   v53.hydrated=true;
   return true;
 }

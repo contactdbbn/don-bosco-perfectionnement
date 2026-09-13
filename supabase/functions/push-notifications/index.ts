@@ -9,6 +9,26 @@ const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY') || ''
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') || 'https://contactdbbn.github.io/don-bosco-perfectionnement/'
 const CRON_SECRET = Deno.env.get('PUSH_CRON_SECRET') || ''
 const APP_URL = 'https://contactdbbn.github.io/don-bosco-perfectionnement/'
+const DEFAULT_SETTINGS: Record<string, {active:boolean,days:number[],start:string,end:string}> = {
+  attendance_reminder:{active:true,days:[0],start:'18:00',end:'18:05'},
+  new_slot_request:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
+  new_status_request:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
+  slot_request_decision:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
+  status_request_decision:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'}
+}
+async function loadNotificationSettings(){
+  const {data,error}=await admin.from('notification_settings').select('notification_type,active,days,start_time,end_time')
+  if(error){ console.warn('[push] paramètres notifications indisponibles, valeurs par défaut utilisées',error); return DEFAULT_SETTINGS }
+  const out={...DEFAULT_SETTINGS}
+  for(const row of data||[]) out[row.notification_type]={active:row.active!==false,days:Array.isArray(row.days)?row.days.map(Number):[],start:String(row.start_time||'07:00').slice(0,5),end:String(row.end_time||'23:00').slice(0,5)}
+  return out
+}
+function withinWindow(now:{hour:number,minute:number},setting:{active:boolean,days:number[],start:string,end:string}){
+  if(!setting.active || !setting.days.includes(new Date(`${now.date}T12:00:00+02:00`).getDay())) return false
+  const cur=now.hour*60+now.minute, start=Number(setting.start.slice(0,2))*60+Number(setting.start.slice(3,5)), end=Number(setting.end.slice(0,2))*60+Number(setting.end.slice(3,5))
+  return start<=end ? cur>=start&&cur<=end : cur>=start||cur<=end
+}
+
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } })
 const authClient = createClient(SUPABASE_URL, ANON_KEY || SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -133,11 +153,12 @@ async function dispatch() {
   const now = parisNow()
   const week = isoWeekMonday()
   let sent = 0
+  const settings = await loadNotificationSettings()
 
   // 1) Rappel de présence le dimanche à 18h pour la semaine suivante.
   const tomorrow = new Date(`${now.date}T12:00:00+02:00`)
   const tomorrowDay = tomorrow.getDay()
-  if (tomorrowDay === 0 && now.hour === 18 && now.minute < 5) {
+  if (withinWindow(now, settings.attendance_reminder)) {
     const next = new Date(tomorrow); next.setDate(next.getDate() + 1)
     const nextWeek = mondayKey(next.toISOString().slice(0, 10))
     const { data: cal } = await admin.from('calendar_weeks').select('week_type').eq('week_start', nextWeek).maybeSingle()
@@ -159,12 +180,12 @@ async function dispatch() {
   const { data: newMoves } = await admin.from('slot_change_requests').select('id, member_id, week_start, requested_slot').eq('status','pending').gte('created_at', since)
   const { data: newStatuses } = await admin.from('status_change_requests').select('id, member_id, week_start, requested_status').eq('status','pending').gte('created_at', since)
   const { data: staff } = await admin.from('profiles').select('id').in('role',['admin','coach']).eq('active',true)
-  for (const req of newMoves || []) {
+  if (withinWindow(now, settings.new_slot_request)) for (const req of newMoves || []) {
     const title = 'Nouvelle demande de créneau'
     const body = `Une demande de changement de créneau concerne la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
     for (const s of staff || []) if (await logOnce(s.id, 'new_slot_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'slot_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_slot_request', String(req.id), title, body); sent += delivered } }
   }
-  for (const req of newStatuses || []) {
+  if (withinWindow(now, settings.new_status_request)) for (const req of newStatuses || []) {
     const title = 'Nouvelle demande de présence'
     const body = `Une demande de modification de présence est en attente pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
     for (const s of staff || []) if (await logOnce(s.id, 'new_status_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'status_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_status_request', String(req.id), title, body); sent += delivered } }
@@ -173,7 +194,7 @@ async function dispatch() {
   // 3) Décisions récentes : notification à l'adhérent concerné.
   const { data: decidedMoves } = await admin.from('slot_change_requests').select('id, member_id, status, week_start').in('status',['approved','rejected','cancelled']).gte('decided_at', since)
   const { data: decidedStatuses } = await admin.from('status_change_requests').select('id, member_id, status, week_start').in('status',['approved','rejected','cancelled']).gte('decided_at', since)
-  for (const req of decidedMoves || []) {
+  if (withinWindow(now, settings.slot_request_decision)) for (const req of decidedMoves || []) {
     const { data: profile } = await admin.from('profiles').select('id').eq('member_id', req.member_id).maybeSingle()
     if (!profile) continue
     const title = 'Demande de créneau'
@@ -181,7 +202,7 @@ async function dispatch() {
     const body = `Votre demande de changement de créneau a été ${label} pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
     if (await logOnce(profile.id, 'slot_request_decision', String(req.id), title, body)) { const delivered = await sendToProfile(profile.id, title, body, { type:'slot_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) { await markLogged(profile.id, 'slot_request_decision', String(req.id), title, body); sent += delivered } }
   }
-  for (const req of decidedStatuses || []) {
+  if (withinWindow(now, settings.status_request_decision)) for (const req of decidedStatuses || []) {
     const { data: profile } = await admin.from('profiles').select('id').eq('member_id', req.member_id).maybeSingle()
     if (!profile) continue
     const title = 'Demande de présence'
