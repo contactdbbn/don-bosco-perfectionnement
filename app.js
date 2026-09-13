@@ -168,7 +168,16 @@ const canEditAttendanceForDate = (memberId,key=weekKey()) => canEditAttendance(m
 const currentMember = () => db.members.find(m => m.id === currentMemberId && m.active);
 const weekKey=()=>{let d=new Date(); d.setDate(d.getDate()+weekOffset*7); const day=d.getDay()||7; d.setDate(d.getDate()-day+1); return isoDate(d)};
 function save(){ return writeStorageJson("sportclub-v1",db); }
-const fmt=d=>new Intl.DateTimeFormat("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}).format(new Date(d+"T12:00:00"));
+function safeDate(value){
+ if(value===null||value===undefined||value==="") return null;
+ const d=value instanceof Date?new Date(value.getTime()):new Date(value);
+ return Number.isFinite(d.getTime())?d:null;
+}
+const fmt=d=>{
+ const raw=String(d??"").trim();
+ const date=safeDate(/^\d{4}-\d{2}-\d{2}$/.test(raw)?raw+"T12:00:00":raw);
+ return date?new Intl.DateTimeFormat("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}).format(date):"date non renseignée";
+};
 const isMemberAbsentByPeriod=(id,key=weekKey())=>db.absencePeriods.some(a=>Number(a.memberId)===Number(id)&&a.start<=key&&a.end>=key);
 const getStatus=(id)=>isMemberAbsentByPeriod(id)?"absent":(db.attendance[weekKey()+"_"+id]||"pending");
 const getStatusForWeek=(id,key=weekKey())=>isMemberAbsentByPeriod(id,key)?"absent":(db.attendance[key+"_"+id]||"pending");
@@ -656,7 +665,7 @@ function renderObjectives(){
  const objectives=(db.sessionObjectives&&typeof db.sessionObjectives==='object')?db.sessionObjectives:{};
  if(!dates.length){ el.innerHTML=`<div class="card empty">Aucune date de cours dans le calendrier.</div>`; return; }
  if(canCoach() && currentRole==='coach'){
-   el.innerHTML=`<div class="card member-history-head"><div><p class="eyebrow">OBJECTIFS</p><h2>Objectifs des séances</h2><div class="muted">Les objectifs saisis dans Mon suivi et les commentaires des adhérents.</div></div><div class="history-summary"><strong>${dates.length}</strong><span>cours</span></div></div><div class="card history-list objective-list">${dates.map(date=>{ const comments=getObjectiveComments(date); const wk=mondayKey(new Date(date+'T12:00:00')); const ac=db.members.filter(m=>m.active); const pc=ac.filter(m=>getStatusForWeek(m.id,wk)==='present').length, ab=ac.filter(m=>getStatusForWeek(m.id,wk)==='absent').length, pe=ac.filter(m=>getStatusForWeek(m.id,wk)==='pending').length; return `<div class="objective-row"><div class="objective-head"><div class="history-date"><strong>${fmt(date)}</strong><span class="history-type">Cours</span></div><div class="objective-presence-summary">Présents ${pc} · Absents ${ab} · À confirmer ${pe}</div></div><div class="objective-text">${objectives[date]?esc(objectives[date]).replace(/\n/g,'<br>'):'<span class="muted">Aucun objectif renseigné.</span>'}</div><div class="objective-reaction-summary">${(()=>{const rr=getObjectiveReactions(date);return `👍 ${rr.filter(r=>r.reaction==='up').length} · 👎 ${rr.filter(r=>r.reaction==='down').length}`;})()}</div><div class="objective-comments"><strong>Commentaires des adhérents (${comments.length})</strong>${comments.length?comments.map(c=>`<div class="objective-comment"><div><strong>${c.anonymous?'Anonyme':esc(c.memberName||'Adhérent')}</strong><span class="muted"> · ${new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(c.createdAt||Date.now()))}</span></div><div>${esc(c.text).replace(/\n/g,'<br>')}</div></div>`).join(''):'<div class="muted">Aucun commentaire.</div>'}</div></div>`; }).join('')}</div>`;
+   el.innerHTML=`<div class="card member-history-head"><div><p class="eyebrow">OBJECTIFS</p><h2>Objectifs des séances</h2><div class="muted">Les objectifs saisis dans Mon suivi et les commentaires des adhérents.</div></div><div class="history-summary"><strong>${dates.length}</strong><span>cours</span></div></div><div class="card history-list objective-list">${dates.map(date=>{ const comments=getObjectiveComments(date); const wk=mondayKey(new Date(date+'T12:00:00')); const ac=db.members.filter(m=>m.active); const pc=ac.filter(m=>getStatusForWeek(m.id,wk)==='present').length, ab=ac.filter(m=>getStatusForWeek(m.id,wk)==='absent').length, pe=ac.filter(m=>getStatusForWeek(m.id,wk)==='pending').length; return `<div class="objective-row"><div class="objective-head"><div class="history-date"><strong>${fmt(date)}</strong><span class="history-type">Cours</span></div><div class="objective-presence-summary">Présents ${pc} · Absents ${ab} · À confirmer ${pe}</div></div><div class="objective-text">${objectives[date]?esc(objectives[date]).replace(/\n/g,'<br>'):'<span class="muted">Aucun objectif renseigné.</span>'}</div><div class="objective-reaction-summary">${(()=>{const rr=getObjectiveReactions(date);return `👍 ${rr.filter(r=>r.reaction==='up').length} · 👎 ${rr.filter(r=>r.reaction==='down').length}`;})()}</div><div class="objective-comments"><strong>Commentaires des adhérents (${comments.length})</strong>${comments.length?comments.map(c=>`<div class="objective-comment"><div><strong>${c.anonymous?'Anonyme':esc(c.memberName||'Adhérent')}</strong><span class="muted"> · ${new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(safeDate(c.createdAt||Date.now())||new Date())}</span></div><div>${esc(c.text).replace(/\n/g,'<br>')}</div></div>`).join(''):'<div class="muted">Aucun commentaire.</div>'}</div></div>`; }).join('')}</div>`;
    return;
  }
  if(currentRole!=='member'){el.innerHTML='';return;}
@@ -716,6 +725,29 @@ function removeAbsencePeriod(id){
  if(confirm(`Supprimer l'absence du ${fmt(a.start)} au ${fmt(a.end)} ?`)){db.absencePeriods=db.absencePeriods.filter(x=>x.id!==id);save();render();toast("Période d'absence supprimée.");}
 }
 
+function presenceDisplayName(name){
+ const text=String(name||"").trim();
+ if(!text) return "";
+ const parts=text.split(/\s+/).filter(Boolean);
+ if(parts.length===1) return parts[0];
+ // Les données peuvent être saisies « Prénom Nom » ou « NOM Prénom ».
+ // Dans les deux cas, on affiche uniquement Prénom + initiale du nom.
+ let firstName, lastName;
+ if(parts[0]===parts[0].toUpperCase() && parts[0]!==parts[0].toLowerCase()){
+   lastName=parts[0];
+   firstName=parts.slice(1).join(" " );
+ }else{
+   lastName=parts[parts.length-1];
+   firstName=parts.slice(0,-1).join(" " );
+ }
+ return `${firstName} ${lastName.charAt(0).toUpperCase()}.`;
+}
+function isPresenceAnonymousMode(){
+ // Le sélecteur de mode est la source de vérité lorsque l'administrateur
+ // ou l'encadrant bascule temporairement en mode Adhérent.
+ const selector=document.getElementById("roleSelect");
+ return selector ? selector.value==="member" : currentRole==="member";
+}
 function personHtml(m){
  const key=weekKey();
  const st=getStatus(m.id), labels={present:"Présent",absent:"Absent",pending:"À confirmer"};
@@ -744,7 +776,7 @@ function personHtml(m){
    && st!=="absent"&&!move
    ? `<div class="slot-request"><span class="muted">Présent mais souhaite jouer sur :</span>${otherSlots.map(slot=>`<button onclick="requestSlot(${m.id},${slot})">${SLOT_NAMES[slot-1]}</button>`).join("")}</div>` : "";
  return `<div class="person">
-   <div><div class="name">${esc(m.name)}${Number(m.id)===currentMemberId?' <span class="you">Vous</span>':''}</div><div class="muted">Créneau habituel ${m.slot} · vient au créneau ${getEffectiveSlot(m.id)} cette semaine · ${getChangeCount(m.id)} changement${getChangeCount(m.id)>1?"s":""}</div>${absenceIndicator}</div>
+   <div><div class="name">${esc(isPresenceAnonymousMode()?presenceDisplayName(m.name):m.name)}${Number(m.id)===currentMemberId?' <span class="you">Vous</span>':''}</div><div class="muted">Créneau habituel ${m.slot} · vient au créneau ${getEffectiveSlot(m.id)} cette semaine · ${getChangeCount(m.id)} changement${getChangeCount(m.id)>1?"s":""}</div>${absenceIndicator}</div>
    <div class="status ${st}"><span class="dot"></span>${labels[st]}</div>
    <div class="muted">${moveLabel || (st==="pending"?"À confirmer":"Réponse enregistrée")}</div>
    ${actions}
@@ -853,7 +885,7 @@ function renderCalendar(){
  const prevDisabled=cursorMonth<=new Date(minMonth.getFullYear(),minMonth.getMonth(),1);
  const nextDisabled=cursorMonth>=new Date(maxMonth.getFullYear(),maxMonth.getMonth(),1);
  document.getElementById("calendarView").innerHTML=`
- <div class="calendar-toolbar"><div><h2>${new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(first)}</h2><div class="muted">Période du calendrier : <strong>${fmt(p.start)} au ${fmt(p.end)}</strong>. Le statut de la semaine est affiché uniquement le lundi.</div></div><div class="week-nav"><button onclick="calendarPrev()" ${prevDisabled?"disabled":""}>←</button><button onclick="calendarToday()">Aujourd'hui</button><button onclick="calendarNext()" ${nextDisabled?"disabled":""}>→</button></div></div>
+ <div class="calendar-toolbar"><div><h2>${safeDate(first)?new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(first):"Calendrier"}</h2><div class="muted">Période du calendrier : <strong>${fmt(p.start)} au ${fmt(p.end)}</strong>. Le statut de la semaine est affiché uniquement le lundi.</div></div><div class="week-nav"><button onclick="calendarPrev()" ${prevDisabled?"disabled":""}>←</button><button onclick="calendarToday()">Aujourd'hui</button><button onclick="calendarNext()" ${nextDisabled?"disabled":""}>→</button></div></div>
  <div class="calendar"><div class="calendar-grid">${cells}</div></div>
  <div class="legend"><span>🟢 Cours</span><span>⚪ Pas de cours</span><span>🟠 Vacances</span><span>🔴 Férié</span><span>🔵 Événement</span></div>
  ${canCoach()?`<div class="card calendar-period-admin" style="margin-top:16px"><div class="row"><div><strong>Période du calendrier</strong><div class="muted">Le calendrier est limité à cette période. Les lundis sans réglage explicite sont automatiquement considérés comme Cours.</div></div></div><div class="calendar-period-fields"><label>Début<input id="calendarPeriodStart" type="date" value="${p.start}"></label><label>Fin<input id="calendarPeriodEnd" type="date" value="${p.end}"></label><button class="primary" onclick="saveCalendarPeriod()">Enregistrer la période</button></div></div>`:""}
@@ -1038,7 +1070,7 @@ function renderMembers(){
  const filtered=all.filter(m=>{const slotOk=membersSlotFilter==="all"||(membersSlotFilter==="none"&&!m.slot)||String(m.slot||"")===membersSlotFilter;const roleOk=membersRoleFilter==="all"||getMemberRole(m)===membersRoleFilter;return slotOk&&roleOk&&(!q||String(m.name||"").toLocaleLowerCase("fr-FR").includes(q));});
  const memberBySlot={1:0,2:0,3:0};
  const accountBySlot={1:0,2:0,3:0};
- all.filter(m=>getMemberRole(m)==="member").forEach(m=>{const slot=Number(m.slot);if(memberBySlot[slot]!=null){memberBySlot[slot]++;if(m.authEmail)accountBySlot[slot]++;}});
+ all.forEach(m=>{const slot=Number(m.slot);if(accountBySlot[slot]!=null&&m.authEmail)accountBySlot[slot]++;});
  const countByRole={member:0,coach:0,admin:0};
  all.forEach(m=>{const r=getMemberRole(m);if(countByRole[r]!=null)countByRole[r]++;});
  const stats=`<div class="members-overview"><div class="member-stat"><strong>${all.length}</strong><span>Personnes actives</span></div><div class="member-stat"><strong>${countByRole.member}</strong><span>Adhérents</span></div><div class="member-stat"><strong>${countByRole.coach}</strong><span>Encadrants</span></div><div class="member-stat"><strong>${countByRole.admin}</strong><span>Administrateurs</span></div></div>`;
@@ -1156,8 +1188,9 @@ function requestStatusLabel(status){
  return status==='approved'?'Validée':status==='rejected'?'Refusée':status==='cancelled'?'Annulée':'En attente';
 }
 function requestDateLabel(ts){
- if(!ts) return 'date non renseignée';
- return new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(ts));
+ const d=safeDate(ts);
+ if(!d) return 'date non renseignée';
+ return new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(d);
 }
 function requestWeekKey(r){
  const raw=r?.week||r?.eventDate;

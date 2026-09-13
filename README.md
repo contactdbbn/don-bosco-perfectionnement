@@ -42,3 +42,16 @@ Le cron Supabase existant toutes les 5 minutes reste inchangé.
 
 
 V91 : réparation automatique de `profiles.auth_email` depuis Supabase Auth pour les anciens comptes, sans bloquer la connexion si ce champ est vide.
+
+## V100 — Corrections demandées
+- Le compteur « comptes existants » par créneau inclut désormais les administrateurs actifs affectés à un créneau.
+- Dans la page « Présences » uniquement, les noms sont affichés sous la forme « Prénom N. ».
+
+## V102 — Anonymisation Présences selon le mode
+- Mode Adhérent : affichage des noms sous la forme « Prénom N. » dans Présences.
+- Modes Encadrant et Administrateur : affichage des noms complets dans Présences.
+
+## V103 — Anonymisation Présences en mode Adhérent
+- Le mode Adhérent anonymise systématiquement les noms dans la page Présences, y compris lors d'une bascule depuis Encadrant/Administrateur.
+- Les modes Encadrant et Administrateur conservent les noms complets.
+- Reconnaissance des formats « Prénom Nom » et « NOM Prénom ».
