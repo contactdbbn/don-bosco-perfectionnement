@@ -55,3 +55,12 @@ V91 : réparation automatique de `profiles.auth_email` depuis Supabase Auth pour
 - Le mode Adhérent anonymise systématiquement les noms dans la page Présences, y compris lors d'une bascule depuis Encadrant/Administrateur.
 - Les modes Encadrant et Administrateur conservent les noms complets.
 - Reconnaissance des formats « Prénom Nom » et « NOM Prénom ».
+
+## V104 — Calendrier et événements
+- « Pas de cours » est désormais affiché « Libre » dans le calendrier.
+- Ajout d’événements sur une période, avec choix toutes les semaines ou une semaine sur deux.
+
+## V105 — Ajout d’événements visible
+- Formulaire d’ajout d’événement directement visible dans le calendrier.
+- Date de début et date de fin.
+- Option « Une semaine sur deux ».

@@ -865,7 +865,7 @@ function renderCalendar(){
    const tag=isMonday
      ? (info.type==="holiday"?`<span class="week-tag week-holiday">Vacances</span>`:
         info.type==="public-holiday"?`<span class="week-tag week-public-holiday">Férié</span>`:
-        info.type==="off"?`<span class="week-tag week-off">Pas de cours</span>`:
+        info.type==="off"?`<span class="week-tag week-off">Libre</span>`:
         info.type==="cancelled"?`<span class="week-tag week-cancelled">Cours annulé</span>`:
         `<span class="week-tag week-course">Cours</span>`)
      : "";
@@ -887,9 +887,9 @@ function renderCalendar(){
  document.getElementById("calendarView").innerHTML=`
  <div class="calendar-toolbar"><div><h2>${safeDate(first)?new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(first):"Calendrier"}</h2><div class="muted">Période du calendrier : <strong>${fmt(p.start)} au ${fmt(p.end)}</strong>. Le statut de la semaine est affiché uniquement le lundi.</div></div><div class="week-nav"><button onclick="calendarPrev()" ${prevDisabled?"disabled":""}>←</button><button onclick="calendarToday()">Aujourd'hui</button><button onclick="calendarNext()" ${nextDisabled?"disabled":""}>→</button></div></div>
  <div class="calendar"><div class="calendar-grid">${cells}</div></div>
- <div class="legend"><span>🟢 Cours</span><span>⚪ Pas de cours</span><span>🟠 Vacances</span><span>🔴 Férié</span><span>🔵 Événement</span></div>
+ <div class="legend"><span>🟢 Cours</span><span>⚪ Libre</span><span>🟠 Vacances</span><span>🔴 Férié</span><span>🔵 Événement</span></div>
  ${canCoach()?`<div class="card calendar-period-admin" style="margin-top:16px"><div class="row"><div><strong>Période du calendrier</strong><div class="muted">Le calendrier est limité à cette période. Les lundis sans réglage explicite sont automatiquement considérés comme Cours.</div></div></div><div class="calendar-period-fields"><label>Début<input id="calendarPeriodStart" type="date" value="${p.start}"></label><label>Fin<input id="calendarPeriodEnd" type="date" value="${p.end}"></label><button class="primary" onclick="saveCalendarPeriod()">Enregistrer la période</button></div></div>`:""}
- ${canCoach()?`<div class="card" style="margin-top:16px"><div class="row"><div><strong>Ajouter un événement</strong><div class="muted">Choisissez n'importe quelle date dans la période du calendrier.</div></div><button class="primary" onclick="addEvent()">+ Ajouter</button></div></div>`:""}
+ ${canCoach()?`<div class="card calendar-event-admin" style="margin-top:16px"><div><strong>Ajouter un événement</strong><div class="muted">Créez un événement sur une date ou sur toute une période. Pour une période, vous pouvez choisir une occurrence chaque semaine ou une semaine sur deux.</div></div><div class="calendar-period-fields"><label>Nom de l'événement<input id="calendarEventTitle" type="text" placeholder="Ex. Stage, réunion, Libre…" autocomplete="off"></label><label>Du<input id="calendarEventStart" type="date" value="${p.start}"></label><label>Au<input id="calendarEventEnd" type="date" value="${p.start}"></label><label style="flex-direction:row;align-items:center;gap:8px;margin-bottom:10px"><input id="calendarEventAlternate" type="checkbox" style="width:auto"> Une semaine sur deux</label><button class="primary" onclick="addEventFromForm()">+ Ajouter l'événement</button></div></div>`:""}
  <div class="card"><strong>Événements à venir</strong>${upcoming.map(e=>`<div class="row" style="margin-top:10px"><div><strong>${esc(e.title)}</strong><div class="muted">${fmt(e.date)}</div></div>${canCoach()?`<button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button>`:""}</div>`).join("")||`<div class="empty">Aucun événement à venir.</div>`}</div>`;
 }
 function saveCalendarPeriod(){
@@ -903,13 +903,56 @@ function saveCalendarPeriod(){
  saveCalendar();renderCalendar();renderMemberHistory();
  toast(`Période du calendrier enregistrée : ${fmt(start)} au ${fmt(end)}.`);
 }
-function addEvent(){
- const date=prompt("Date de l'événement (AAAA-MM-JJ) :");if(!date)return;
- addEventForDate(date);
+function addEventFromForm(){
+ if(!canCoach()) return toast("Réservé à l’encadrement.");
+ const title=document.getElementById("calendarEventTitle")?.value?.trim();
+ const date=document.getElementById("calendarEventStart")?.value;
+ const endDate=document.getElementById("calendarEventEnd")?.value || date;
+ const everyOtherWeek=!!document.getElementById("calendarEventAlternate")?.checked;
+ if(!title) return toast("Saisissez le nom de l'événement.");
+ if(!date||!endDate||date>endDate||!isDateInCalendarPeriod(date)||!isDateInCalendarPeriod(endDate)) return toast("Période invalide ou hors du calendrier.");
+ if(everyOtherWeek && date===endDate) return toast("Pour une seule date, décochez « Une semaine sur deux ».");
+ const normalized=normalizeCalendarType(title);
+ const type=['Cours','Libre','Vacances','Férié','Cours annulé'].includes(normalized) ? normalized : title;
+ let created=0;
+ const first=new Date(date+"T12:00:00"), last=new Date(endDate+"T12:00:00");
+ for(let d=new Date(first), index=0; d<=last; d.setDate(d.getDate()+7), index++){
+   if(everyOtherWeek && index%2===1) continue;
+   const eventDate=isoDate(d);
+   if(!isDateInCalendarPeriod(eventDate)) continue;
+   calendarData.events.push({id:Date.now()+created,date:eventDate,eventType:type,title:type,reportDate:null});
+   created++;
+ }
+ if(!created) return toast("Aucun événement n'a pu être ajouté dans la période sélectionnée.");
+ saveCalendar();renderCalendar();renderEvents();renderMemberHistory();
+ document.getElementById("calendarEventTitle").value="";
+ document.getElementById("calendarEventStart").value=date;
+ document.getElementById("calendarEventEnd").value=date;
+ document.getElementById("calendarEventAlternate").checked=false;
+ toast(`${created} événement${created>1?'s':''} ajouté${created>1?'s':''}${everyOtherWeek?' (une semaine sur deux)':''}.`);
 }
-function addEventForDate(date){
+function addEvent(){
+ const date=prompt("Date de début de l'événement (AAAA-MM-JJ) :");
+ if(!date)return;
+ addEventForDate(date,true);
+}
+function addEventForDate(date,withPeriodPrompt=false){
  if(!canCoach()) return toast("Réservé à l’encadrement.");
  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!isDateInCalendarPeriod(date))return toast("Date hors de la période du calendrier.");
+ let endDate=date;
+ let everyOtherWeek=false;
+ if(withPeriodPrompt){
+   const end=prompt("Date de fin de la période (AAAA-MM-JJ). Pour un seul jour, laissez la date de début :",date);
+   if(!end)return;
+   endDate=end.trim();
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(endDate)||!isDateInCalendarPeriod(endDate)||endDate<date)return toast("Période invalide ou hors du calendrier.");
+   if(endDate!==date){
+     const recurrence=prompt("Récurrence : saisir '1' pour toutes les semaines ou '2' pour une semaine sur deux.","1");
+     if(recurrence===null)return;
+     if(recurrence.trim()!=="1" && recurrence.trim()!=="2")return toast("Récurrence invalide.");
+     everyOtherWeek=recurrence.trim()==="2";
+   }
+ }
  const raw=prompt("Nom / type de l'événement (libre) : vous pouvez saisir un texte personnalisé.", "");
  if(!raw || !raw.trim())return;
  const label=raw.trim();
@@ -917,14 +960,28 @@ function addEventForDate(date){
  const type=['Cours','Libre','Vacances','Férié','Cours annulé'].includes(normalized) ? normalized : label;
  let reportDate=null;
  if(type==='Cours annulé'){
-   reportDate=prompt("Date de report (AAAA-MM-JJ). Laissez vide si le report est en attente :", "");
-   if(reportDate && reportDate.trim().toLowerCase()!=='attente') {
-     reportDate=reportDate.trim();
-     if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!isDateInCalendarPeriod(reportDate))return toast("Date de report hors de la période du calendrier.");
-   } else reportDate=null;
+   if(endDate!==date){
+     toast("Pour une période de plusieurs dates, le report d'un 'Cours annulé' doit être renseigné séparément après création.");
+   } else {
+     reportDate=prompt("Date de report (AAAA-MM-JJ). Laissez vide si le report est en attente :", "");
+     if(reportDate && reportDate.trim().toLowerCase()!=='attente') {
+       reportDate=reportDate.trim();
+       if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!isDateInCalendarPeriod(reportDate))return toast("Date de report hors de la période du calendrier.");
+     } else reportDate=null;
+   }
  }
- calendarData.events.push({id:Date.now(),date,eventType:type,title:type,reportDate});
- saveCalendar();renderCalendar();renderEvents();renderMemberHistory();toast("Événement ajouté");
+ const first=new Date(date+"T12:00:00");
+ const last=new Date(endDate+"T12:00:00");
+ let index=0;
+ for(let d=new Date(first);d<=last;d.setDate(d.getDate()+7)){ 
+   if(everyOtherWeek && index%2===1){ index++; continue; }
+   const eventDate=isoDate(d);
+   if(!isDateInCalendarPeriod(eventDate)){ index++; continue; }
+   calendarData.events.push({id:Date.now()+index,date:eventDate,eventType:type,title:type,reportDate:index===0?reportDate:null});
+   index++;
+ }
+ saveCalendar();renderCalendar();renderEvents();renderMemberHistory();
+ toast(endDate!==date ? `Événement ajouté sur la période du ${fmt(date)} au ${fmt(endDate)}${everyOtherWeek?' (une semaine sur deux)':''}.` : "Événement ajouté");
 }
 function editSpecialEvent(id){
  if(!canCoach()) return toast("Réservé à l’encadrement.");
@@ -992,11 +1049,11 @@ function calendarToday(){const today=isoDate(new Date());calendarCursor=isDateIn
 
 function editWeek(key){
  const current=weekInfo(key).type;
- const currentLabel=current==='course'?'cours':current==='off'?'pas de cours':current==='public-holiday'?'férié':current==='cancelled'?'cours annulé':'vacances';
- const choice=prompt("Semaine du "+fmt(key)+" — saisir : cours / pas de cours / vacances / férié / cours annulé",currentLabel);
+ const currentLabel=current==='course'?'cours':current==='off'?'libre':current==='public-holiday'?'férié':current==='cancelled'?'cours annulé':'vacances';
+ const choice=prompt("Semaine du "+fmt(key)+" — saisir : cours / libre / vacances / férié / cours annulé",currentLabel);
  if(!choice)return;
  const clean=choice.toLowerCase().trim();
- const map={"cours":"course","pas de cours":"off","vacances":"holiday","férié":"public-holiday","ferie":"public-holiday","cours annulé":"cancelled","cours annule":"cancelled"};
+ const map={"cours":"course","libre":"off","pas de cours":"off","vacances":"holiday","férié":"public-holiday","ferie":"public-holiday","cours annulé":"cancelled","cours annule":"cancelled"};
  const type=map[clean]; if(!type)return toast("Valeur invalide.");
  let reportDate=null;
  if(type==='cancelled'){

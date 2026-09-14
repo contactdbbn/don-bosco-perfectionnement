@@ -81,6 +81,8 @@ select,input{border:1px solid var(--line);border-radius:9px;padding:9px;backgrou
 .calendar-period-fields label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--muted)}
 .calendar-period-fields input{padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text);font:inherit}
 .calendar-period-fields button{height:40px}
+.calendar-event-admin .calendar-period-fields{align-items:flex-end}
+.calendar-event-admin input[type="text"]{min-width:220px}
 .week-nav button:disabled{opacity:.4;cursor:not-allowed}
 
 .special-events-list{padding:0;overflow:hidden}.special-event-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 18px;border-bottom:1px solid var(--line)}.special-event-row:last-child{border-bottom:0}.special-event-row .actions{display:flex;gap:8px;flex-wrap:wrap}.special-event-row .actions button{padding:7px 10px;border-radius:8px;background:#eef2ff;color:var(--primary);font-weight:700}.special-event-row .actions .danger{background:#fff0f1;color:var(--red)}
