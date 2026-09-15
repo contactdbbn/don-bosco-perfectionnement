@@ -64,3 +64,24 @@ V91 : réparation automatique de `profiles.auth_email` depuis Supabase Auth pour
 - Formulaire d’ajout d’événement directement visible dans le calendrier.
 - Date de début et date de fin.
 - Option « Une semaine sur deux ».
+
+
+## V106 — Rappel de présence corrigé
+
+V106 conserve les fonctionnalités de V105 et corrige la logique de la notification **Rappel de présence** dans `supabase/functions/push-notifications/index.ts`.
+
+- La semaine ciblée est toujours **la semaine suivante** : le lundi suivant + 7 jours, quel que soit le jour d'envoi configuré.
+- Le jour et la plage horaire proviennent de `notification_settings`.
+- Une réponse `Présent`, `Absent` ou `À confirmer` empêche le rappel.
+- Les **adhérents actifs** sont ciblés s'ils ont un créneau 1/2/3.
+- Les **administrateurs actifs affectés à un créneau 1/2/3** sont également ciblés.
+- Les encadrants ne sont pas ciblés par le rappel de présence.
+- Les logs Supabase indiquent la fenêtre, la semaine ciblée, le nombre de profils éligibles, les réponses déjà présentes, les profils sans créneau et les envois réussis/échoués.
+- La protection contre les doublons est atomique grâce à la contrainte unique existante de `push_notification_log`; une réservation est supprimée si aucun push n'a été réellement envoyé afin de permettre un nouvel essai dans la fenêtre.
+- Les autres notifications (demandes et décisions) conservent leur comportement et bénéficient également de la réservation atomique anti-doublon.
+
+### Déploiement
+
+1. Remplacer/déployer uniquement l'Edge Function `push-notifications` avec `supabase/functions/push-notifications/index.ts`.
+2. Aucun nouveau SQL n'est nécessaire si les tables `push_subscriptions`, `push_notification_log` et `notification_settings` existent déjà comme en V105.
+3. Le Cron `*/5 * * * *` reste inchangé.

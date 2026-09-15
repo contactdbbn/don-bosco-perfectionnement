@@ -23,8 +23,18 @@ async function loadNotificationSettings(){
   for(const row of data||[]) out[row.notification_type]={active:row.active!==false,days:Array.isArray(row.days)?row.days.map(Number):[],start:String(row.start_time||'07:00').slice(0,5),end:String(row.end_time||'23:00').slice(0,5)}
   return out
 }
-function withinWindow(now:{hour:number,minute:number},setting:{active:boolean,days:number[],start:string,end:string}){
-  if(!setting.active || !setting.days.includes(new Date(`${now.date}T12:00:00+02:00`).getDay())) return false
+function weekdayFromDate(dateString:string){
+  return new Date(`${dateString}T12:00:00Z`).getUTCDay()
+}
+
+function addDays(dateString:string, days:number){
+  const d=new Date(`${dateString}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate()+days)
+  return d.toISOString().slice(0,10)
+}
+
+function withinWindow(now:{date:string,hour:number,minute:number},setting:{active:boolean,days:number[],start:string,end:string}){
+  if(!setting.active || !setting.days.includes(weekdayFromDate(now.date))) return false
   const cur=now.hour*60+now.minute, start=Number(setting.start.slice(0,2))*60+Number(setting.start.slice(3,5)), end=Number(setting.end.slice(0,2))*60+Number(setting.end.slice(3,5))
   return start<=end ? cur>=start&&cur<=end : cur>=start||cur<=end
 }
@@ -56,9 +66,9 @@ function parisNow() {
 }
 
 function mondayKey(dateString: string) {
-  const d = new Date(`${dateString}T12:00:00+02:00`)
-  const day = d.getDay() || 7
-  d.setDate(d.getDate() - day + 1)
+  const d = new Date(`${dateString}T12:00:00Z`)
+  const day = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() - day + 1)
   return d.toISOString().slice(0, 10)
 }
 
@@ -123,56 +133,146 @@ async function sendToProfile(profileId: string, title: string, body: string, dat
   return sent
 }
 
-async function logOnce(profileId: string, type: string, eventKey: string, title: string, body: string) {
-  const { data: existing, error: existingError } = await admin
-    .from('push_notification_log')
-    .select('id')
-    .eq('profile_id', profileId)
-    .eq('notification_type', type)
-    .eq('event_key', eventKey)
-    .maybeSingle()
-  if (existingError) throw existingError
-  if (existing) return false
-  return true
-}
-
-async function markLogged(profileId: string, type: string, eventKey: string, title: string, body: string) {
+async function claimNotification(profileId:string, type:string, eventKey:string, title:string, body:string){
+  // Réservation atomique : la contrainte UNIQUE(profile_id, notification_type, event_key)
+  // empêche deux invocations Cron simultanées d'envoyer deux fois le même événement.
   const { data, error } = await admin
     .from('push_notification_log')
     .insert({ profile_id: profileId, notification_type: type, event_key: eventKey, title, body })
     .select('id')
     .maybeSingle()
-  if (error) {
-    if (String(error.code) === '23505') return false
+  if(error){
+    if(String(error.code)==='23505'){
+      console.log(`[push][dedupe] déjà traité/réservé profile=${profileId} type=${type} event=${eventKey}`)
+      return false
+    }
     throw error
   }
   return !!data
 }
 
+async function releaseNotification(profileId:string, type:string, eventKey:string){
+  const { error } = await admin
+    .from('push_notification_log')
+    .delete()
+    .eq('profile_id',profileId)
+    .eq('notification_type',type)
+    .eq('event_key',eventKey)
+  if(error) console.warn(`[push][dedupe] libération impossible profile=${profileId} type=${type} event=${eventKey}: ${error.message}`)
+}
+
+async function deliverOnce(profileId:string, type:string, eventKey:string, title:string, body:string, data:Record<string,unknown>={}){
+  const claimed=await claimNotification(profileId,type,eventKey,title,body)
+  if(!claimed) return 0
+  try{
+    const delivered=await sendToProfile(profileId,title,body,data)
+    if(delivered>0) return delivered
+    // Aucun abonnement actif : on retire la réservation pour permettre une nouvelle
+    // tentative pendant la fenêtre configurée.
+    await releaseNotification(profileId,type,eventKey)
+    return 0
+  }catch(e){
+    // En cas d'échec d'envoi, le prochain passage Cron pourra retenter.
+    await releaseNotification(profileId,type,eventKey)
+    throw e
+  }
+}
+
 async function dispatch() {
   const now = parisNow()
+  console.log(`[push][dispatch] démarrage date=${now.date} heure=${String(now.hour).padStart(2,'0')}:${String(now.minute).padStart(2,'0')} jour=${weekdayFromDate(now.date)}`)
   const week = isoWeekMonday()
   let sent = 0
   const settings = await loadNotificationSettings()
 
-  // 1) Rappel de présence le dimanche à 18h pour la semaine suivante.
-  const tomorrow = new Date(`${now.date}T12:00:00+02:00`)
-  const tomorrowDay = tomorrow.getDay()
+  // 1) Rappel de présence. Le jour et l'heure sont entièrement pilotés par
+  // l'administration. Quel que soit le jour choisi, le rappel concerne la
+  // semaine suivante (lundi suivant), jamais la semaine en cours.
   if (withinWindow(now, settings.attendance_reminder)) {
-    const next = new Date(tomorrow); next.setDate(next.getDate() + 1)
-    const nextWeek = mondayKey(next.toISOString().slice(0, 10))
-    const { data: cal } = await admin.from('calendar_weeks').select('week_type').eq('week_start', nextWeek).maybeSingle()
+    const nextWeek = addDays(week, 7)
+    console.log(`[push][attendance_reminder] fenêtre ACTIVE date=${now.date} ${String(now.hour).padStart(2,'0')}:${String(now.minute).padStart(2,'0')} jour=${weekdayFromDate(now.date)} semaine_actuelle=${week} semaine_suivante=${nextWeek}`)
+
+    const { data: cal, error: calError } = await admin
+      .from('calendar_weeks')
+      .select('week_type')
+      .eq('week_start', nextWeek)
+      .maybeSingle()
+    if(calError) throw calError
+
     const attendanceWeek = !cal || ['course','free','off','cancelled'].includes(cal.week_type)
-    if (attendanceWeek) {
-      const { data: profiles } = await admin.from('profiles').select('id,member_id').eq('role','member').eq('active',true).not('member_id','is',null)
-      for (const p of profiles || []) {
-        const { data: attendance } = await admin.from('attendance').select('status').eq('week_start', nextWeek).eq('member_id', p.member_id).maybeSingle()
-        if (attendance?.status) continue
-        const title = 'Rappel de présence'
-        const body = `Merci de confirmer votre présence pour la semaine du ${new Date(`${nextWeek}T12:00:00`).toLocaleDateString('fr-FR')}.`
-        if (await logOnce(p.id, 'attendance_reminder', nextWeek, title, body)) { const delivered = await sendToProfile(p.id, title, body, { type: 'attendance_reminder', week: nextWeek }); if (delivered > 0) { await markLogged(p.id, 'attendance_reminder', nextWeek, title, body); sent += delivered } }
+    console.log(`[push][attendance_reminder] calendrier semaine=${nextWeek} type=${cal?.week_type||'absent'} éligible=${attendanceWeek}`)
+
+    if(attendanceWeek){
+      const { data: profiles, error: profilesError } = await admin
+        .from('profiles')
+        .select('id,member_id,role,display_name')
+        .in('role',['member','admin'])
+        .eq('active',true)
+        .not('member_id','is',null)
+      if(profilesError) throw profilesError
+
+      const memberIds=[...(profiles||[])].map(p=>Number(p.member_id)).filter(Number.isFinite)
+      let members:any[]=[]
+      if(memberIds.length){
+        const { data, error } = await admin
+          .from('members')
+          .select('id,name,habitual_slot,active')
+          .in('id',memberIds)
+        if(error) throw error
+        members=data||[]
       }
+      const memberById=new Map(members.map(m=>[Number(m.id),m]))
+
+      let eligible=0, alreadyAnswered=0, noSlot=0, sentProfiles=0
+      for(const p of profiles||[]){
+        const member=memberById.get(Number(p.member_id))
+        const role=String(p.role||'member')
+        // Adhérents : tous les comptes actifs avec un créneau.
+        // Administrateurs : uniquement ceux affectés à un créneau.
+        // Encadrants : volontairement exclus du rappel de présence.
+        if(!member || member.active===false || ![1,2,3].includes(Number(member.habitual_slot))){
+          noSlot++
+          console.log(`[push][attendance_reminder] IGNORÉ profile=${p.id} role=${role} member_id=${p.member_id} motif=créneau_invalide_ou_membre_inactif`)
+          continue
+        }
+        eligible++
+
+        const { data: attendance, error: attendanceError } = await admin
+          .from('attendance')
+          .select('status')
+          .eq('week_start',nextWeek)
+          .eq('member_id',p.member_id)
+          .maybeSingle()
+        if(attendanceError) throw attendanceError
+
+        // Toute réponse enregistrée (Présent, Absent ou À confirmer) est
+        // considérée comme une réponse : aucun rappel n'est envoyé.
+        const hasAnswered=attendance?.status!==undefined && attendance?.status!==null && String(attendance.status).trim()!==''
+        if(hasAnswered){
+          alreadyAnswered++
+          console.log(`[push][attendance_reminder] DÉJÀ RÉPONDU profile=${p.id} role=${role} créneau=${member.habitual_slot} statut=${attendance.status}`)
+          continue
+        }
+
+        const title='Rappel de présence'
+        const body=`Merci de confirmer votre présence pour la semaine du ${new Date(`${nextWeek}T12:00:00Z`).toLocaleDateString('fr-FR',{timeZone:'Europe/Paris'})}.`
+        try{
+          const delivered=await deliverOnce(p.id,'attendance_reminder',nextWeek,title,body,{type:'attendance_reminder',week:nextWeek,slot:Number(member.habitual_slot)})
+          if(delivered>0){
+            sent+=delivered
+            sentProfiles++
+            console.log(`[push][attendance_reminder] ENVOYÉ profile=${p.id} role=${role} créneau=${member.habitual_slot} appareils=${delivered}`)
+          }else{
+            console.log(`[push][attendance_reminder] NON ENVOYÉ profile=${p.id} role=${role} créneau=${member.habitual_slot} motif=aucun_abonnement_push_actif_ou_déjà_traité`)
+          }
+        }catch(e){
+          console.error(`[push][attendance_reminder] ÉCHEC profile=${p.id} role=${role} créneau=${member.habitual_slot}`,e)
+        }
+      }
+      console.log(`[push][attendance_reminder] BILAN profils=${profiles?.length||0} éligibles=${eligible} déjà_répondu=${alreadyAnswered} sans_créneau=${noSlot} profils_envoyés=${sentProfiles}`)
     }
+  } else {
+    console.log(`[push][attendance_reminder] fenêtre INACTIVE date=${now.date} ${String(now.hour).padStart(2,'0')}:${String(now.minute).padStart(2,'0')} jour=${weekdayFromDate(now.date)}`)
   }
 
   // 2) Nouvelles demandes : notification aux encadrants/admins.
@@ -183,12 +283,18 @@ async function dispatch() {
   if (withinWindow(now, settings.new_slot_request)) for (const req of newMoves || []) {
     const title = 'Nouvelle demande de créneau'
     const body = `Une demande de changement de créneau concerne la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    for (const s of staff || []) if (await logOnce(s.id, 'new_slot_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'slot_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_slot_request', String(req.id), title, body); sent += delivered } }
+    for (const s of staff || []) {
+      const delivered = await deliverOnce(s.id, 'new_slot_request', String(req.id), title, body, { type:'slot_request', requestId:req.id })
+      if (delivered > 0) sent += delivered
+    }
   }
   if (withinWindow(now, settings.new_status_request)) for (const req of newStatuses || []) {
     const title = 'Nouvelle demande de présence'
     const body = `Une demande de modification de présence est en attente pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    for (const s of staff || []) if (await logOnce(s.id, 'new_status_request', String(req.id), title, body)) { const delivered = await sendToProfile(s.id, title, body, { type:'status_request', requestId:req.id }); if (delivered > 0) { await markLogged(s.id, 'new_status_request', String(req.id), title, body); sent += delivered } }
+    for (const s of staff || []) {
+      const delivered = await deliverOnce(s.id, 'new_status_request', String(req.id), title, body, { type:'status_request', requestId:req.id })
+      if (delivered > 0) sent += delivered
+    }
   }
 
   // 3) Décisions récentes : notification à l'adhérent concerné.
@@ -200,7 +306,7 @@ async function dispatch() {
     const title = 'Demande de créneau'
     const label = req.status === 'approved' ? 'validée' : req.status === 'rejected' ? 'refusée' : 'annulée'
     const body = `Votre demande de changement de créneau a été ${label} pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    if (await logOnce(profile.id, 'slot_request_decision', String(req.id), title, body)) { const delivered = await sendToProfile(profile.id, title, body, { type:'slot_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) { await markLogged(profile.id, 'slot_request_decision', String(req.id), title, body); sent += delivered } }
+    const delivered = await deliverOnce(profile.id, 'slot_request_decision', String(req.id), title, body, { type:'slot_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) sent += delivered
   }
   if (withinWindow(now, settings.status_request_decision)) for (const req of decidedStatuses || []) {
     const { data: profile } = await admin.from('profiles').select('id').eq('member_id', req.member_id).maybeSingle()
@@ -208,7 +314,7 @@ async function dispatch() {
     const title = 'Demande de présence'
     const label = req.status === 'approved' ? 'validée' : req.status === 'rejected' ? 'refusée' : 'annulée'
     const body = `Votre demande de modification de présence a été ${label} pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    if (await logOnce(profile.id, 'status_request_decision', String(req.id), title, body)) { const delivered = await sendToProfile(profile.id, title, body, { type:'status_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) { await markLogged(profile.id, 'status_request_decision', String(req.id), title, body); sent += delivered } }
+    const delivered = await deliverOnce(profile.id, 'status_request_decision', String(req.id), title, body, { type:'status_request_decision', requestId:req.id, status:req.status }); if (delivered > 0) sent += delivered
   }
 
   return { ok: true, sent, week, now }
@@ -247,7 +353,7 @@ export default {
       }
       return json({ error: 'Action inconnue.' }, 400)
     } catch (e) {
-      console.error('[V82 push-notifications]', e)
+      console.error('[V106 push-notifications]', e)
       return json({ error: String((e as any)?.message || e) }, 500)
     }
   }
