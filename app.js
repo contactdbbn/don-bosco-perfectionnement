@@ -140,6 +140,14 @@ function canManageRoles(){return authState==="admin";}
 const canEditAttendance = (memberId) => canCoach() || Number(memberId) === currentMemberId;
 const isPastWeek = (key=weekKey()) => key < mondayKey(new Date());
 const hasResponded = (memberId,key=weekKey()) => Object.prototype.hasOwnProperty.call(db.attendance, key+"_"+memberId) || isMemberAbsentByPeriod(memberId,key);
+// Réponse définitive : seuls Présent et Absent permettent de considérer
+// qu'un adhérent a répondu pour le traitement forcé de 13h30.
+// Une valeur "pending" / "À confirmer" ne suffit pas.
+const hasDefinitiveResponse = (memberId,key=weekKey()) => {
+  if(isMemberAbsentByPeriod(memberId,key)) return true;
+  const status=String(db.attendance?.[key+"_"+memberId]||"").toLowerCase();
+  return status==="present" || status==="absent";
+};
 const getAttendanceEventDates = (key=weekKey()) => calendarData.events.filter(e => {
   const title=String(e.title||"").trim().toLowerCase();
   return (title==="cours" || title==="libre") && mondayKey(new Date(e.date+"T12:00:00"))===key;
@@ -190,7 +198,7 @@ const getMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>m.m
 const getLatestMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>Number(m.memberId)===Number(memberId)).sort((a,b)=>Number(b.createdAt||b.id||0)-Number(a.createdAt||a.id||0))[0]||null;
 function slotRequestStatusLabel(status){
  if(status==="pending") return "en attente de validation";
- if(status==="approved") return "validée";
+ if(status==="approved") return "acceptée";
  if(status==="rejected") return "refusée";
  if(status==="cancelled") return "annulée";
  return String(status||"");
@@ -200,7 +208,7 @@ const getEffectiveSlot=(memberId,key=weekKey())=>{
  const move=getWeekMoves(key).filter(x=>x.memberId===Number(memberId)&&x.status==="approved").sort((a,b)=>b.approvedAt-b.approvedAt||b.id-a.id)[0];
  return move?Number(move.to):Number(m.slot);
 };
-const getControlPresence=(slot,key=weekKey())=>db.members.filter(m=>m.active&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatus(m.id)==="present").length;
+const getControlPresence=(slot,key=weekKey())=>db.members.filter(m=>m.active&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatusForWeek(m.id,key)==="present").length;
 const getControlAbsent=(slot,key=weekKey())=>db.members.filter(m=>m.active&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatus(m.id)==="absent").length;
 const getDeclaredPresenceCount=(memberId)=>Object.entries(db.attendance||{}).filter(([key,value])=>key.endsWith("_"+memberId)&&value==="present").length;
 const getChangeCount=(memberId)=>Number(db.members.find(m=>m.id===Number(memberId))?.changeCount||0);
@@ -1276,7 +1284,7 @@ function requestTypeLabel(type){
  return 'Demande';
 }
 function requestStatusLabel(status){
- return status==='approved'?'Validée':status==='rejected'?'Refusée':status==='cancelled'?'Annulée':'En attente';
+ return status==='approved'?'Acceptée':status==='rejected'?'Refusée':status==='cancelled'?'Annulée':'En attente';
 }
 function requestDateLabel(ts){
  const d=safeDate(ts);
@@ -1411,7 +1419,7 @@ function renderMoves(){
  const moveHtml=showPending&&pending.length?pending.map((x,index)=>{const name=x.name||db.members.find(m=>Number(m.id)===Number(x.memberId))?.name||'Adhérent';return `<div class="card"><div class="row"><div><strong>${index+1}. ${esc(name)}</strong><div class="muted">Demande de changement · semaine du ${fmt(x.week)} · ${slotLabel(x.from)} → ${slotLabel(x.to)}</div><div class="muted">${getChangeCount(x.memberId)} changement${getChangeCount(x.memberId)>1?'s':''} déjà effectué${getChangeCount(x.memberId)>1?'s':''} · envoyée le ${requestDateLabel(x.createdAt)}</div></div><div class="actions"><button class="primary" onclick="approveMove(${x.id})">Valider</button><button class="danger" onclick="rejectMove(${x.id})">Refuser</button></div></div></div>`;}).join(''):'<div class="empty">Aucune demande de changement de créneau en cours.</div>';
  const pendingTotal=pending.length+pendingStatusRequests.length;
  const processedTotal=processed.length;
- document.getElementById('movesView').innerHTML=`<div class="card"><div class="row"><div><h2>Demandes</h2><div class="muted">Filtrez les demandes en cours ou déjà traitées.</div></div><button class="primary" onclick="autoValidateMoves()">Lancer le traitement 13h30</button></div><div class="request-filter" role="group" aria-label="Filtrer les demandes"><button class="filter-btn ${adminRequestFilter==='pending'?'active':''}" onclick="setAdminRequestFilter('pending')">En cours (${pendingTotal})</button><button class="filter-btn ${adminRequestFilter==='processed'?'active':''}" onclick="setAdminRequestFilter('processed')">Traitées (${processedTotal})</button><button class="filter-btn ${adminRequestFilter==='all'?'active':''}" onclick="setAdminRequestFilter('all')">Toutes</button></div><div class="move-capacity">${SLOT_NAMES.map((n,i)=>`<span><strong>${n}</strong> ${counts[i]}/20 présents · ${targetPending[i]} demande${targetPending[i]>1?'s':''} en attente vers ce créneau</span>`).join('')}</div></div>${showPending?`<h3 class="request-section-title">Demandes en attente de modification de présence</h3>${statusRequestHtml}<h3 class="request-section-title">Demandes en attente de changement de créneau</h3>${moveHtml}`:''}${showProcessed?`<h3 class="request-section-title">Demandes traitées</h3>${historyHtml}`:''}`;
+ document.getElementById('movesView').innerHTML=`<div class="card"><div class="row"><div><h2>Demandes</h2><div class="muted">Filtrez les demandes en cours ou déjà traitées.</div></div><button class="primary" onclick="forceValidateMoves()">Lancer le traitement 13h30</button></div><div class="request-filter" role="group" aria-label="Filtrer les demandes"><button class="filter-btn ${adminRequestFilter==='pending'?'active':''}" onclick="setAdminRequestFilter('pending')">En cours (${pendingTotal})</button><button class="filter-btn ${adminRequestFilter==='processed'?'active':''}" onclick="setAdminRequestFilter('processed')">Traitées (${processedTotal})</button><button class="filter-btn ${adminRequestFilter==='all'?'active':''}" onclick="setAdminRequestFilter('all')">Toutes</button></div><div class="move-capacity">${SLOT_NAMES.map((n,i)=>`<span><strong>${n}</strong> ${counts[i]}/20 présents · ${targetPending[i]} demande${targetPending[i]>1?'s':''} en attente vers ce créneau</span>`).join('')}</div></div>${showPending?`<h3 class="request-section-title">Demandes en attente de modification de présence</h3>${statusRequestHtml}<h3 class="request-section-title">Demandes en attente de changement de créneau</h3>${moveHtml}`:''}${showProcessed?`<h3 class="request-section-title">Demandes traitées</h3>${historyHtml}`:''}`;
 }
 async function setMemberRole(id,role){
  if(!canManageRoles()) return toast("Seul l'administrateur peut gérer les rôles.");
@@ -1481,24 +1489,138 @@ function approveMove(id,auto=false){
  member.changeCount=Number(member.changeCount||0)+1;
  save();return true;
 }
-function autoValidateMoves(){
- if(!isAttendanceWeek()) return {processed:0,approved:0,rejected:0,remaining:0};
- const key=weekKey();
- const pending=getWeekMoves(key).filter(m=>m.status==='pending').sort((a,b)=>getChangeCount(a.memberId)-getChangeCount(b.memberId)||Number(a.createdAt||a.id||0)-Number(b.createdAt||b.id||0));
- let approved=0,rejected=0;
- pending.forEach(x=>{
-   const ok=approveMove(x.id,true);
-   if(ok) approved++;
-   else {
-     const current=db.moves.find(m=>Number(m.id)===Number(x.id));
-     if(current&&current.status==='pending'){
-       current.status='rejected'; current.rejectedAt=Date.now(); current.autoRejected=true; rejected++;
-     }
+function getNextAttendanceWeekAndDate(){
+ const today=isoDate(new Date());
+ const candidates=[];
+ const seen=new Set();
+
+ // Une semaine de présence est déterminée par son statut du calendrier :
+ // Cours, Libre ou Cours annulé (ce dernier compte comme Libre).
+ // Si aucun événement daté n'est présent, le lundi de la semaine est la
+ // date de référence. V112 exigeait à tort un événement "Cours/Libre"
+ // pour les semaines définies directement dans calendarData.weeks.
+ Object.entries(calendarData.weeks||{}).forEach(([key,info])=>{
+   if(!isDateInCalendarPeriod(key) || key<today) return;
+   const type=info?.type;
+   if(type!=='course'&&type!=='off'&&type!=='cancelled') return;
+   const dates=getAttendanceEventDates(key);
+   const date=dates.find(d=>d>=today)||key;
+   if(date>=today && !seen.has(key)){
+     seen.add(key);
+     candidates.push({week:key,date});
    }
  });
+
+ // Les événements Cours/Libre/Cours annulé ajoutés manuellement peuvent
+ // également créer une date de présence dans une semaine.
+ calendarData.events.filter(e=>{
+   const title=String(e.title||'').trim().toLowerCase();
+   return title==='cours'||title==='libre'||title==='cours annulé';
+ }).forEach(e=>{
+   if(!e.date||e.date<today||!isDateInCalendarPeriod(e.date)) return;
+   const key=mondayKey(new Date(e.date+'T12:00:00'));
+   if(!seen.has(key)){
+     seen.add(key);
+     candidates.push({week:key,date:e.date});
+   }
+ });
+
+ candidates.sort((a,b)=>a.date.localeCompare(b.date)||a.week.localeCompare(b.week));
+ return candidates[0]||null;
+}
+
+function allMembersRespondedForTargetSlot(key,slot){
+ const target=Number(slot);
+ if(![1,2,3].includes(target)) return false;
+ // En mode forcé, on vérifie uniquement les adhérents du créneau cible
+ // de la demande. Il est inutile de bloquer une demande vers le créneau 2
+ // parce qu'un adhérent du créneau 1 ou 3 n'a pas encore répondu.
+ const members=db.members.filter(m=>m.active&&getMemberRole(m)==='member'&&getEffectiveSlot(m.id,key)===target);
+ return members.every(m=>hasDefinitiveResponse(m.id,key));
+}
+
+function getMovePriorityList(key){
+ return getWeekMoves(key).filter(m=>m.status==='pending').sort((a,b)=>
+   getChangeCount(a.memberId)-getChangeCount(b.memberId)||
+   Number(a.createdAt||a.id||0)-Number(b.createdAt||b.id||0)
+ );
+}
+
+function autoValidateMoves(mode='automatic'){
+ const target=getNextAttendanceWeekAndDate();
+ if(!target){
+   toast('Aucune prochaine date Cours ou Libre à traiter.');
+   return {processed:0,approved:0,rejected:0,remaining:0,week:null,date:null};
+ }
+ const key=target.week;
+ const pending=getMovePriorityList(key);
+ if(!pending.length){
+   toast(`Aucune demande de changement en attente pour le ${fmt(target.date)}.`);
+   return {processed:0,approved:0,rejected:0,remaining:0,week:key,date:target.date};
+ }
+
+ // Exécution forcée : pour chaque demande, on vérifie uniquement que
+ // tous les adhérents du créneau cible ont répondu Présent ou Absent.
+ // Les autres créneaux ne bloquent pas le traitement de cette demande.
+ const forcedSlotReady={};
+ // Réserve immédiatement les places consommées par les demandes acceptées
+ // pendant ce même traitement. Le demandeur peut être encore « À confirmer »
+ // et ne doit donc pas apparaître dans getControlPresence(); néanmoins une
+ // demande acceptée occupe bien une place pour les suivantes.
+ const reservedBySlot={};
+
+ let approved=0,rejected=0;
+ pending.forEach(x=>{
+   const current=db.moves.find(m=>Number(m.id)===Number(x.id));
+   const member=db.members.find(m=>Number(m.id)===Number(x.memberId));
+   if(!current||current.status!=='pending'||!member||!member.active) return;
+
+   // En exécution forcée, la demande est traitée uniquement si tous les
+   // adhérents du créneau cible ont répondu. Le contrôle est mémorisé par
+   // créneau afin de ne pas recalculer inutilement les trois créneaux.
+   if(mode==='forced'){
+     const targetSlot=Number(current.to);
+     if(forcedSlotReady[targetSlot]===undefined){
+       forcedSlotReady[targetSlot]=allMembersRespondedForTargetSlot(key,targetSlot);
+     }
+     if(!forcedSlotReady[targetSlot]) return;
+   }
+
+   // Présence de contrôle sur la semaine réellement traitée.
+   // Une demande acceptée dans ce traitement réserve une place même si
+   // le membre est encore « À confirmer » et n'est donc pas compté par
+   // getControlPresence().
+   const occupied=getControlPresence(current.to,key) + Number(reservedBySlot[Number(current.to)]||0);
+   const canFit=occupied<20;
+   if(canFit){
+     reservedBySlot[Number(current.to)]=(reservedBySlot[Number(current.to)]||0)+1;
+     current.status='approved';
+     current.approvedAt=Date.now();
+     current.autoApproved=mode==='automatic';
+     current.forcedApproved=mode==='forced';
+     member.changeCount=Number(member.changeCount||0)+1;
+     approved++;
+   }else{
+     current.status='rejected';
+     current.rejectedAt=Date.now();
+     current.autoRejected=mode==='automatic';
+     current.forcedRejected=mode==='forced';
+     rejected++;
+   }
+ } );
+
  const remaining=getWeekMoves(key).filter(m=>m.status==='pending').length;
- if(approved||rejected){save();render();toast(`${approved} validée${approved>1?'s':''}, ${rejected} refusée${rejected>1?'s':''} automatiquement à 13h30.`);}
- return {processed:pending.length,approved,rejected,remaining};
+ if(approved||rejected){
+   save();
+   render();
+ }
+ const label=mode==='forced'?'forcé':'automatique';
+ toast(`${approved} acceptée${approved>1?'s':''}, ${rejected} refusée${rejected>1?'s':''} · ${label} · ${fmt(target.date)}.`);
+ return {processed:approved+rejected,approved,rejected,remaining,week:key,date:target.date};
+}
+
+function forceValidateMoves(){
+ return autoValidateMoves('forced');
 }
 
 function scheduleAutoValidation(){
@@ -1507,7 +1629,7 @@ function scheduleAutoValidation(){
    const marker=now.getFullYear()+"-"+(now.getMonth()+1)+"-"+now.getDate();
    if(localStorage.getItem("sportclub-auto-validation-date")!==marker){
      localStorage.setItem("sportclub-auto-validation-date",marker);
-     autoValidateMoves();
+     autoValidateMoves('automatic');
    }
  }
 }
