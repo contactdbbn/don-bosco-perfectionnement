@@ -184,6 +184,17 @@ const getStatus=(id)=>isMemberAbsentByPeriod(id)?"absent":(db.attendance[weekKey
 const getStatusForWeek=(id,key=weekKey())=>isMemberAbsentByPeriod(id,key)?"absent":(db.attendance[key+"_"+id]||"pending");
 const getWeekMoves=(key=weekKey())=>db.moves.filter(m=>m.week===key);
 const getMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>m.memberId===Number(memberId)&&(m.status==="pending"||m.status==="approved")).sort((a,b)=>b.id-a.id)[0];
+// Dernière demande de changement de créneau de l'adhérent pour la semaine.
+// Inclut les demandes traitées afin que l'adhérent puisse voir leur statut
+// directement sur Présences et Mon suivi.
+const getLatestMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>Number(m.memberId)===Number(memberId)).sort((a,b)=>Number(b.createdAt||b.id||0)-Number(a.createdAt||a.id||0))[0]||null;
+function slotRequestStatusLabel(status){
+ if(status==="pending") return "en attente de validation";
+ if(status==="approved") return "validée";
+ if(status==="rejected") return "refusée";
+ if(status==="cancelled") return "annulée";
+ return String(status||"");
+}
 const getEffectiveSlot=(memberId,key=weekKey())=>{
  const m=db.members.find(x=>x.id===Number(memberId)); if(!m) return null;
  const move=getWeekMoves(key).filter(x=>x.memberId===Number(memberId)&&x.status==="approved").sort((a,b)=>b.approvedAt-b.approvedAt||b.id-a.id)[0];
@@ -593,15 +604,17 @@ function memberHistoryRow(event,me){
  const request=(past||locked) && hasResponded(me.id,weekKey);
  const pendingReq=(db.statusRequests||[]).find(r=>Number(r.memberId)===Number(me.id)&&r.week===weekKey&&r.status==='pending');
  const effectiveSlot=getEffectiveSlot(me.id,weekKey);
- const approvedMove=getWeekMoves(weekKey).find(r=>Number(r.memberId)===Number(me.id)&&r.status==='approved');
+ const approvedMove=getWeekMoves(weekKey).filter(r=>Number(r.memberId)===Number(me.id)&&r.status==='approved').sort((a,b)=>Number(b.approvedAt||b.createdAt||b.id||0)-Number(a.approvedAt||a.createdAt||a.id||0))[0];
+ const latestMove=getLatestMoveForMember(me.id,weekKey);
  const slotInfo=approvedMove&&effectiveSlot?`<span class="history-slot">Créneau effectif : ${SLOT_NAMES[effectiveSlot-1]}</span>`:'';
+ const moveRequestInfo=latestMove?`<div class="request-pending member-slot-request-status">🔄 <strong>Demande de changement de créneau : ${slotRequestStatusLabel(latestMove.status)}</strong> · ${SLOT_NAMES[Number(latestMove.from)-1]||slotLabel(latestMove.from)} → ${SLOT_NAMES[Number(latestMove.to)-1]||slotLabel(latestMove.to)}${latestMove.status==='approved'?` · créneau effectif : ${SLOT_NAMES[effectiveSlot-1]||slotLabel(effectiveSlot)}`:''}</div>`:'';
  const absencePeriod=(db.absencePeriods||[]).find(a=>Number(a.memberId)===Number(me.id)&&a.start<=weekKey&&a.end>=weekKey);
  const absenceIndicator=absencePeriod?`<div class="absence-warning" title="Une période d’absence couvre cette semaine.">⚠️ <strong>Période d’absence active</strong><span> · ${fmt(absencePeriod.start)} → ${fmt(absencePeriod.end)}</span></div>`:'';
  const statusButtons=`<div class="history-actions"><button class="${st==='present'?'primary':''}" onclick="setStatusForWeek(${me.id},'present','${weekKey}')">Présent</button><button class="${st==='absent'?'danger':''}" onclick="setStatusForWeek(${me.id},'absent','${weekKey}')">Absent</button><button class="${st==='pending'?'secondary':''}" onclick="setStatusForWeek(${me.id},'pending','${weekKey}')">À confirmer</button></div>`;
  const requestButtons=`<div class="history-actions"><span class="muted">Demander une modification :</span><button onclick="requestStatusChangeForEvent(${me.id},'present','${eventDate}','${weekKey}')">Présent</button><button onclick="requestStatusChangeForEvent(${me.id},'absent','${eventDate}','${weekKey}')">Absent</button><button onclick="requestStatusChangeForEvent(${me.id},'pending','${eventDate}','${weekKey}')">À confirmer</button></div>`;
  const pendingLabel=pendingReq?`<div class="muted request-pending">⏳ Statut demandé : <strong>${labels[pendingReq.requestedStatus]}</strong> — en attente de validation</div>`:'';
  const controls=(!past&&!locked)?statusButtons:(past?`<div class="muted">Statut historique — modification directe réservée à l’administrateur</div>${request?(pendingReq?pendingLabel:requestButtons):`<div class="muted">Aucune réponse enregistrée : aucune demande de modification à envoyer.</div>`}`:`<div class="muted">Statut verrouillé après 19h30</div>${request?(pendingReq?pendingLabel:requestButtons):``}`);
- return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}${absenceIndicator}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${controls}</div></div>`;
+ return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}${moveRequestInfo}${absenceIndicator}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${controls}</div></div>`;
 }
 if(!db.sessionObjectives||typeof db.sessionObjectives!=='object') db.sessionObjectives={};
 function getCourseDates(){
@@ -755,9 +768,10 @@ function personHtml(m){
  const editable=canEditAttendanceForDate(m.id,key);
  const locked=!canCoach() && isStatusLockedAt1930(m.id,key);
  const move=getMoveForMember(m.id);
+ const latestMove=getLatestMoveForMember(m.id,key);
  const absencePeriod=isMemberAbsentByPeriod(m.id,key);
  const otherSlots=SLOT_NAMES.map((name,i)=>i+1).filter(slot=>slot!==m.slot);
- const moveLabel=move?(move.status==="approved"?`Créneau demandé : ${move.to} ✓`:`Demande en attente : créneau ${move.to}`):"";
+ const moveLabel=latestMove?`<span class="request-pending">🔄 Demande de changement : <strong>${slotRequestStatusLabel(latestMove.status)}</strong> · ${SLOT_NAMES[Number(latestMove.from)-1]||slotLabel(latestMove.from)} → ${SLOT_NAMES[Number(latestMove.to)-1]||slotLabel(latestMove.to)}${latestMove.status==="approved"?` · créneau effectif : ${SLOT_NAMES[getEffectiveSlot(m.id,key)-1]||slotLabel(getEffectiveSlot(m.id,key))}`:""}</span>`:"";
  const absenceIndicator=absencePeriod?`<div class="absence-warning" title="Une période d’absence couvre cette semaine.">⚠️ <strong>Période d’absence active</strong><span> · ${fmt(absencePeriod.start)} → ${fmt(absencePeriod.end)}</span></div>`:"";
  const eventDate=getAttendanceEventDate(key);
  const statusRequest=db.statusRequests.find(r=>Number(r.memberId)===Number(m.id)&&r.week===key&&(!r.eventDate||!eventDate||r.eventDate===eventDate)&&r.status==="pending");

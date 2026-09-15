@@ -370,3 +370,5 @@ img,svg,canvas{max-width:100%;}
 
 /* V107 — Envois manuels de notifications */
 .notification-manual{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.notification-send-btn{white-space:nowrap}@media(max-width:700px){.notification-manual{align-items:stretch;flex-direction:column}.notification-send-btn{width:100%}}
+.member-slot-request-status{display:block;margin-top:6px;padding:6px 8px;border-radius:8px;background:rgba(245,158,11,.08)}
+.person .request-pending{display:block;margin-top:4px}

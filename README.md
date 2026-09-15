@@ -1,6 +1,6 @@
-# Don Bosco - Perfectionnement — V107
+# Don Bosco - Perfectionnement — V108
 
-## Ajouts V107
+## Ajouts V108
 
 - Nouvelle notification Push **« Présence confirmée »**.
 - Elle cible les adhérents dont le statut est **Présent** pour la semaine envoyée.
@@ -29,3 +29,13 @@
   `15/09/2026 · Créneau 2 · Présent`.
 - Valider ensuite un changement de créneau et relancer : la notification utilise le créneau effectif validé et la clé anti-doublon est différente.
 - Relancer sans modification : aucune seconde notification identique ne doit être envoyée.
+
+
+## V108 — demandes de changement de créneau visibles par l’adhérent
+
+- La page **Présences** affiche désormais la dernière demande de changement de créneau de l’adhérent pour la semaine sélectionnée.
+- Le statut affiché est **en attente de validation**, **validée**, **refusée** ou **annulée**, avec le créneau demandé.
+- Lorsqu’une demande est validée, le **créneau effectif** est également affiché.
+- La page **Mon suivi** affiche la même information sur chaque date Cours/Libre concernée.
+- Les demandes de modification de présence (`status_change`) restent distinctes et ne sont pas confondues avec les demandes de changement de créneau (`slot_change`).
+- Toutes les fonctionnalités de V107 sont conservées.
