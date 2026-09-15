@@ -134,6 +134,7 @@ function setMemberHabitualSlot(id,slot){
 }
 function canAdmin(){return authState==="admin"&&currentRole==="admin";}
 function canCoach(){return authState==="admin"||authState==="coach";}
+function canManageEvents(){return authState==="admin";}
 function canManageRoles(){return authState==="admin";}
 
 
@@ -896,26 +897,20 @@ function renderCalendar(){
      <div class="day-number">${date.getDate()}</div>
      ${tag}
      ${events.map(e=>`<div class="event" title="${esc(eventDisplayTitle(e))}">🔵 ${esc(eventDisplayTitle(e))}${eventTypeOf(e)==='Cours annulé'&&eventReportDate(e)?` → report ${esc(fmt(eventReportDate(e)))}`:''}</div>`).join("")}
-     ${canCoach()
-       ? `<div class="cal-admin"><button onclick="addEventForDate('${key}')">+ Événement</button>${isMonday?`<br><button onclick="editWeek('${wk}')">Modifier semaine</button>`:""}</div>`
-       : ""}
    </div>`;
  }
- const upcoming=calendarData.events.filter(e=>isDateInCalendarPeriod(e.date)&&e.date>=isoDate(new Date())).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
  const minMonth=new Date(p.start+"T12:00:00");
  const maxMonth=new Date(p.end+"T12:00:00");
  const cursorMonth=new Date(y,mo,1);
  const prevDisabled=cursorMonth<=new Date(minMonth.getFullYear(),minMonth.getMonth(),1);
  const nextDisabled=cursorMonth>=new Date(maxMonth.getFullYear(),maxMonth.getMonth(),1);
  document.getElementById("calendarView").innerHTML=`
- <div class="calendar-toolbar"><div><h2>${safeDate(first)?new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(first):"Calendrier"}</h2><div class="muted">Période du calendrier : <strong>${fmt(p.start)} au ${fmt(p.end)}</strong>. Le statut de la semaine est affiché uniquement le lundi.</div></div><div class="week-nav"><button onclick="calendarPrev()" ${prevDisabled?"disabled":""}>←</button><button onclick="calendarToday()">Aujourd'hui</button><button onclick="calendarNext()" ${nextDisabled?"disabled":""}>→</button></div></div>
+ <div class="calendar-toolbar"><div><h2>${safeDate(first)?new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric"}).format(first):"Calendrier"}</h2><div class="muted">Période : <strong>${fmt(p.start)} au ${fmt(p.end)}</strong>. Le statut de la semaine est affiché uniquement le lundi.</div></div><div class="week-nav"><button onclick="calendarPrev()" ${prevDisabled?"disabled":""}>←</button><button onclick="calendarToday()">Aujourd'hui</button><button onclick="calendarNext()" ${nextDisabled?"disabled":""}>→</button></div></div>
  <div class="calendar"><div class="calendar-grid">${cells}</div></div>
- <div class="legend"><span>🟢 Cours</span><span>⚪ Libre</span><span>🟠 Vacances</span><span>🔴 Férié</span><span>🔵 Événement</span></div>
- ${canCoach()?`<div class="card calendar-period-admin" style="margin-top:16px"><div class="row"><div><strong>Période du calendrier</strong><div class="muted">Le calendrier est limité à cette période. Les lundis sans réglage explicite sont automatiquement considérés comme Cours.</div></div></div><div class="calendar-period-fields"><label>Début<input id="calendarPeriodStart" type="date" value="${p.start}"></label><label>Fin<input id="calendarPeriodEnd" type="date" value="${p.end}"></label><button class="primary" onclick="saveCalendarPeriod()">Enregistrer la période</button></div></div>`:""}
- ${canCoach()?`<div class="card calendar-event-admin" style="margin-top:16px"><div><strong>Ajouter un événement</strong><div class="muted">Créez un événement sur une date ou sur toute une période. Pour une période, vous pouvez choisir une occurrence chaque semaine ou une semaine sur deux.</div></div><div class="calendar-period-fields"><label>Nom de l'événement<input id="calendarEventTitle" type="text" placeholder="Ex. Stage, réunion, Libre…" autocomplete="off"></label><label>Du<input id="calendarEventStart" type="date" value="${p.start}"></label><label>Au<input id="calendarEventEnd" type="date" value="${p.start}"></label><label style="flex-direction:row;align-items:center;gap:8px;margin-bottom:10px"><input id="calendarEventAlternate" type="checkbox" style="width:auto"> Une semaine sur deux</label><button class="primary" onclick="addEventFromForm()">+ Ajouter l'événement</button></div></div>`:""}
- <div class="card"><strong>Événements à venir</strong>${upcoming.map(e=>`<div class="row" style="margin-top:10px"><div><strong>${esc(e.title)}</strong><div class="muted">${fmt(e.date)}</div></div>${canCoach()?`<button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button>`:""}</div>`).join("")||`<div class="empty">Aucun événement à venir.</div>`}</div>`;
+ <div class="legend"><span>🟢 Cours</span><span>⚪ Libre</span><span>🟠 Vacances</span><span>🔴 Férié</span><span>🔵 Événement</span></div>`;
 }
 function saveCalendarPeriod(){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
  if(!canCoach()) return toast("Réservé à l’encadrement.");
  const start=document.getElementById("calendarPeriodStart")?.value;
  const end=document.getElementById("calendarPeriodEnd")?.value;
@@ -927,6 +922,7 @@ function saveCalendarPeriod(){
  toast(`Période du calendrier enregistrée : ${fmt(start)} au ${fmt(end)}.`);
 }
 function addEventFromForm(){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
  if(!canCoach()) return toast("Réservé à l’encadrement.");
  const title=document.getElementById("calendarEventTitle")?.value?.trim();
  const date=document.getElementById("calendarEventStart")?.value;
@@ -1007,6 +1003,7 @@ function addEventForDate(date,withPeriodPrompt=false){
  toast(endDate!==date ? `Événement ajouté sur la période du ${fmt(date)} au ${fmt(endDate)}${everyOtherWeek?' (une semaine sur deux)':''}.` : "Événement ajouté");
 }
 function editSpecialEvent(id){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
  if(!canCoach()) return toast("Réservé à l’encadrement.");
  const e=calendarData.events.find(x=>x.id===Number(id)); if(!e)return;
  const type=eventTypeOf(e);
@@ -1028,7 +1025,8 @@ function editSpecialEvent(id){
  e.eventType=finalType;e.title=finalType;
  saveCalendar();renderCalendar();renderEvents();renderMemberHistory();toast("Événement modifié");
 }
-function deleteEvent(id){if(confirm("Supprimer cet événement ?")){calendarData.events=calendarData.events.filter(e=>e.id!==id);saveCalendar();renderCalendar();renderEvents();renderMemberHistory();toast("Événement supprimé")}}
+function deleteEvent(id){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");if(confirm("Supprimer cet événement ?")){calendarData.events=calendarData.events.filter(e=>e.id!==id);saveCalendar();renderCalendar();renderEvents();renderMemberHistory();toast("Événement supprimé")}}
 function getSpecialCalendarEvents(){
  const items=[]; const seen=new Set();
  const add=(date,type,reportDate=null,id='')=>{
@@ -1054,23 +1052,130 @@ function getManualEventsForEventsTab(){
  }).map(e=>({id:e.id,date:String(e.date||'').slice(0,10),type:eventDisplayTitle(e),reportDate:eventReportDate(e)||null}))
    .sort((a,b)=>a.date.localeCompare(b.date)||a.type.localeCompare(b.type));
 }
+function weekTypeLabel(type){
+ return ({course:'Cours',off:'Libre',holiday:'Vacances','public-holiday':'Férié',cancelled:'Cours annulé'})[type]||'Cours';
+}
+function weekTypeOptions(selected){
+ return [['course','Cours'],['off','Libre'],['holiday','Vacances'],['public-holiday','Férié'],['cancelled','Cours annulé']]
+   .map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
+}
+function setWeekTypeFromSelect(key,type){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
+ if(!['course','off','holiday','public-holiday','cancelled'].includes(type)) return toast("Type de semaine invalide.");
+ let reportDate=null;
+ if(type==='cancelled'){
+   const current=weekInfo(key).reportDate||'';
+   const report=prompt("Date de report (AAAA-MM-JJ). Laissez vide si le report est en attente :",current);
+   if(report===null)return renderEvents();
+   if(report.trim() && report.trim().toLowerCase()!=='attente'){
+     reportDate=report.trim();
+     if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!isDateInCalendarPeriod(reportDate))return toast("Date de report hors de la période du calendrier.");
+   }
+ }
+ calendarData.weeks[key]={type,label:weekTypeLabel(type),reportDate};
+ saveCalendar();renderCalendar();renderEvents();renderMemberHistory();toast(`Semaine du ${fmt(key)} définie : ${weekTypeLabel(type)}.`);
+}
+function addTypedEvent(type){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
+ if(!['Férié','Cours annulé','Libre'].includes(type)) return;
+ const date=prompt(`Date du ${type.toLowerCase()} (AAAA-MM-JJ) :`,"");
+ if(!date)return;
+ const clean=date.trim();
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(clean)||!isDateInCalendarPeriod(clean))return toast("Date invalide ou hors de la période du calendrier.");
+ let reportDate=null;
+ if(type==='Cours annulé'){
+   const report=prompt("Date de report (AAAA-MM-JJ). Laissez vide si le report est en attente :","");
+   if(report===null)return;
+   if(report.trim() && report.trim().toLowerCase()!=='attente'){
+     reportDate=report.trim();
+     if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!isDateInCalendarPeriod(reportDate))return toast("Date de report invalide ou hors de la période du calendrier.");
+   }
+ }
+ const id=Date.now();
+ calendarData.events.push({id,date:clean,eventType:type,title:type,reportDate});
+ // Les Libre sont désormais des événements ajoutés manuellement :
+ // ils ne modifient jamais le type de semaine dans calendarData.weeks.
+ // Les jours fériés et cours annulés restent synchronisés lorsqu'ils tombent un lundi.
+ if(type!=='Libre' && new Date(clean+"T12:00:00").getDay()===1){
+   const map={'Férié':'public-holiday','Cours annulé':'cancelled'};
+   calendarData.weeks[clean]={type:map[type],label:type,reportDate};
+ }
+ saveCalendar();renderCalendar();renderEvents();renderMemberHistory();
+ toast(`${type} ajouté pour le ${fmt(clean)}.`);
+}
+function getWeekTypeRows(){
+ return Object.entries(calendarData.weeks||{})
+   .filter(([key])=>isDateInCalendarPeriod(key))
+   .sort((a,b)=>a[0].localeCompare(b[0]));
+}
+function getEventsByType(type){
+ const out=[];
+ const seen=new Set();
+ const add=(e,id)=>{
+   const date=String(e.date||'').slice(0,10), t=eventTypeOf(e);
+   if(t!==type||!isDateInCalendarPeriod(date))return;
+   const key=String(id)+'|'+date+'|'+t+'|'+(eventReportDate(e)||'');
+   if(seen.has(key))return; seen.add(key); out.push({id,date,type:t,reportDate:eventReportDate(e)||null});
+ };
+ (calendarData.events||[]).forEach(e=>add(e,e.id));
+ if(type!=='Libre'){
+   Object.entries(calendarData.weeks||{}).forEach(([date,info])=>{
+     const t=weekTypeLabel(info?.type);
+     if(t===type) add({date,eventType:t,title:t,reportDate:info?.reportDate||null},'week:'+date);
+   });
+ }
+ return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function eventSectionRows(items){
+ return items.map(e=>`<div class="special-event-row"><div><strong>${esc(e.type)}</strong><div class="muted">${fmt(e.date)}${e.type==='Cours annulé'?` · Report : <strong>${e.reportDate?fmt(e.reportDate):'En attente'}</strong>`:''}</div></div>${canManageEvents()?`<div class="actions">${String(e.id).startsWith('week:')?`<button onclick="editWeek('${String(e.id).slice(5)}')">Modifier</button>`:`<button onclick="editSpecialEvent(${e.id})">Modifier</button><button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button>`}</div>`:''}</div>`).join('');
+}
 function renderEvents(){
  const el=document.getElementById('eventsView'); if(!el)return;
- const special=getSpecialCalendarEvents();
- const manual=getManualEventsForEventsTab();
- const specialRows=special.map(e=>{const report=e.reportDate;return `<div class="special-event-row"><div><strong>${esc(e.type)}</strong><div class="muted">${fmt(e.date)}${e.type==='Cours annulé'?` · Report : <strong>${report?fmt(report):'En attente'}</strong>`:''}</div></div>${currentRole==='admin'?`<div class="actions">${e.id.startsWith('week:')?`<button onclick="editWeek('${e.id.slice(5)}')">Modifier</button>`:`<button onclick="editSpecialEvent(${e.id})">Modifier</button><button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button>`}</div>`:''}</div>`}).join('');
- const manualRows=manual.map(e=>`<div class="special-event-row"><div><strong>${esc(e.type)}</strong><div class="muted">${fmt(e.date)}${e.type==='Cours annulé'?` · Report : <strong>${e.reportDate?fmt(e.reportDate):'En attente'}</strong>`:''}</div></div>${currentRole==='admin'?`<div class="actions"><button onclick="editSpecialEvent(${e.id})">Modifier</button><button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button></div>`:''}</div>`).join('');
+ const weeks=getWeekTypeRows();
+ const holidays=getEventsByType('Férié');
+ const cancelled=getEventsByType('Cours annulé');
+ const libre=getEventsByType('Libre');
+ const specialVacations=getEventsByType('Vacances');
+ const others=(calendarData.events||[]).filter(e=>{
+   const type=eventTypeOf(e), date=String(e.date||'').slice(0,10);
+   return isDateInCalendarPeriod(date) && !['Libre','Férié','Cours annulé','Vacances'].includes(type);
+ }).map(e=>({id:e.id,date,type:eventDisplayTitle(e),reportDate:eventReportDate(e)||null}))
+   .sort((a,b)=>a.date.localeCompare(b.date)||a.type.localeCompare(b.type));
+ const weekRows=weeks.map(([key,info])=>`<div class="special-event-row"><div><strong>Semaine du ${fmt(key)}</strong><div class="muted">Type actuel : <strong>${esc(weekTypeLabel(info?.type))}</strong></div></div>${canManageEvents()?`<div class="actions"><select class="event-week-type-select" onchange="setWeekTypeFromSelect('${key}',this.value)">${weekTypeOptions(info?.type)}</select></div>`:''}</div>`).join('');
+ const holidayRows=eventSectionRows(holidays);
+ const cancelledRows=eventSectionRows(cancelled);
+ const libreRows=eventSectionRows(libre);
+ const otherRows=others.map(e=>`<div class="special-event-row"><div><strong>${esc(e.type)}</strong><div class="muted">${fmt(e.date)}</div></div>${canManageEvents()?`<div class="actions"><button onclick="editSpecialEvent(${e.id})">Modifier</button><button class="danger" onclick="deleteEvent(${e.id})">Supprimer</button></div>`:''}</div>`).join('');
  el.innerHTML=`
- <div class="card"><div class="row"><div><p class="eyebrow">ÉVÉNEMENTS</p><h2>Vacances, fériés et cours annulés</h2><div class="muted">Liste des semaines configurées et des événements particuliers. Les cours annulés sont considérés comme Libre pour la présence.</div></div><div class="history-summary"><strong>${special.length}</strong><span>événements</span></div></div></div>
- <div class="card special-events-list">${special.length?specialRows:`<div class="empty">Aucun événement Vacances, Férié ou Cours annulé dans la période du calendrier.</div>`}</div>
- <div class="card"><div class="row"><div><p class="eyebrow">ÉVÉNEMENTS AJOUTÉS</p><h2>Autres événements manuels</h2><div class="muted">Tous les événements ajoutés manuellement sont listés ici, sauf les événements « Libre ». Les cours du lundi créés automatiquement ne sont pas concernés.</div></div><div class="history-summary"><strong>${manual.length}</strong><span>événements</span></div></div></div>
- <div class="card special-events-list">${manual.length?manualRows:`<div class="empty">Aucun autre événement manuel dans la période.</div>`}</div>`;
+ <div class="events-page-intro"><p class="eyebrow">ÉVÉNEMENTS</p><h2>Gestion du calendrier et des événements</h2><div class="muted">Toutes les sections sont repliées par défaut pour faciliter la lecture. Ouvrez uniquement la catégorie à gérer.</div></div>
+ <details class="card event-section"><summary><span>Types de semaines</span><span class="event-section-count">(${weeks.length})</span></summary><div class="event-section-body">
+   ${canManageEvents()?`<div class="calendar-period-fields"><label>Début<input id="calendarPeriodStart" type="date" value="${getCalendarPeriod().start}"></label><label>Fin<input id="calendarPeriodEnd" type="date" value="${getCalendarPeriod().end}"></label><button class="primary" onclick="saveCalendarPeriod()">Enregistrer la période</button></div>`:''}
+   <div class="muted event-help">Les lundis sans réglage explicite sont automatiquement des <strong>Cours</strong>. Utilisez la liste ci-dessous pour définir une semaine en Cours, <strong>Libre</strong>, Vacances, Férié ou Cours annulé. La section « Libre » ci-dessous reste réservée aux événements Libre ajoutés manuellement.</div>
+   <div class="special-events-list">${weekRows||'<div class="empty">Aucune semaine dans la période.</div>'}</div>
+ </div></details>
+ <details class="card event-section"><summary><span>Jours fériés</span><span class="event-section-count">(${holidays.length})</span></summary><div class="event-section-body">
+   ${canManageEvents()?`<div class="event-section-actions"><button class="primary" onclick="addTypedEvent('Férié')">+ Définir un jour férié</button></div>`:''}
+   <div class="special-events-list">${holidayRows||'<div class="empty">Aucun jour férié défini dans la période.</div>'}</div>
+ </div></details>
+ <details class="card event-section"><summary><span>Cours annulés</span><span class="event-section-count">(${cancelled.length})</span></summary><div class="event-section-body">
+   ${canManageEvents()?`<div class="event-section-actions"><button class="primary" onclick="addTypedEvent('Cours annulé')">+ Définir un cours annulé</button></div>`:''}
+   <div class="special-events-list">${cancelledRows||'<div class="empty">Aucun cours annulé dans la période.</div>'}</div>
+ </div></details>
+ <details class="card event-section"><summary><span>Libre</span><span class="event-section-count">(${libre.length})</span></summary><div class="event-section-body">
+   ${canManageEvents()?`<div class="event-section-actions"><button class="primary" onclick="addTypedEvent('Libre')">+ Définir un Libre</button></div>`:''}
+   <div class="special-events-list">${libreRows||'<div class="empty">Aucun Libre défini dans la période.</div>'}</div>
+ </div></details>
+ <details class="card event-section"><summary><span>Autres événements</span><span class="event-section-count">(${others.length})</span></summary><div class="event-section-body">
+   ${canManageEvents()?`<div class="calendar-event-admin"><div><strong>Ajouter un événement</strong><div class="muted">Ajoutez un événement sur une date ou sur toute une période, avec possibilité d'une semaine sur deux.</div></div><div class="calendar-period-fields"><label>Nom de l'événement<input id="calendarEventTitle" type="text" placeholder="Ex. Stage, réunion…" autocomplete="off"></label><label>Du<input id="calendarEventStart" type="date" value="${getCalendarPeriod().start}"></label><label>Au<input id="calendarEventEnd" type="date" value="${getCalendarPeriod().start}"></label><label style="flex-direction:row;align-items:center;gap:8px;margin-bottom:10px"><input id="calendarEventAlternate" type="checkbox" style="width:auto"> Une semaine sur deux</label><button class="primary" onclick="addEventFromForm()">+ Ajouter l'événement</button></div></div>`:''}
+   <div class="special-events-list">${otherRows||'<div class="empty">Aucun autre événement dans la période.</div>'}</div>
+ </div></details>`;
 }
 function calendarPrev(){const p=getCalendarPeriod(),min=new Date(p.start+"T12:00:00");calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);if(calendarCursor<new Date(min.getFullYear(),min.getMonth(),1))calendarCursor=new Date(min.getFullYear(),min.getMonth(),1);renderCalendar()}
 function calendarNext(){const p=getCalendarPeriod(),max=new Date(p.end+"T12:00:00");calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);if(calendarCursor>new Date(max.getFullYear(),max.getMonth(),1))calendarCursor=new Date(max.getFullYear(),max.getMonth(),1);renderCalendar()}
 function calendarToday(){const today=isoDate(new Date());calendarCursor=isDateInCalendarPeriod(today)?new Date(today+"T12:00:00"):new Date(getCalendarPeriod().start+"T12:00:00");renderCalendar()}
 
 function editWeek(key){
+ if(!canManageEvents()) return toast("Réservé à l’administrateur.");
  const current=weekInfo(key).type;
  const currentLabel=current==='course'?'cours':current==='off'?'libre':current==='public-holiday'?'férié':current==='cancelled'?'cours annulé':'vacances';
  const choice=prompt("Semaine du "+fmt(key)+" — saisir : cours / libre / vacances / férié / cours annulé",currentLabel);
