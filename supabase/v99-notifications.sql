@@ -13,7 +13,8 @@ insert into public.notification_settings(notification_type,active,days,start_tim
 ('new_slot_request',true,'{0,1,2,3,4,5,6}','07:00','23:00'),
 ('new_status_request',true,'{0,1,2,3,4,5,6}','07:00','23:00'),
 ('slot_request_decision',true,'{0,1,2,3,4,5,6}','07:00','23:00'),
-('status_request_decision',true,'{0,1,2,3,4,5,6}','07:00','23:00')
+('status_request_decision',true,'{0,1,2,3,4,5,6}','07:00','23:00'),
+('attendance_confirmed',true,'{0,1,2,3,4,5,6}','07:00','23:00')
 on conflict (notification_type) do nothing;
 
 alter table public.notification_settings enable row level security;

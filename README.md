@@ -1,87 +1,31 @@
-V89 — correction de la confirmation email côté Auth : les comptes créés par l’administrateur sont confirmés côté serveur avant authentification.
+# Don Bosco - Perfectionnement — V107
 
-# Don Bosco - Perfectionnement — V88
+## Ajouts V107
 
-V83 reprend la V81 et conserve Supabase, GitHub Pages et les Notifications Push.
-
-## V83 — Notifications Push : diagnostic et correction
-
-La fonction Supabase `push-notifications` a été renforcée pour tracer précisément le traitement des notifications :
-- démarrage du dispatch ;
-- nombre d'abonnements actifs ;
-- tentative d'envoi ;
-- statut HTTP retourné par le service Push ;
-- succès, refus ou erreur ;
-- désactivation automatique des abonnements retournant 404/410 ;
-- nombre d'envois réellement réussis.
-
-Le journal `push_notification_log` n'est désormais créé qu'après au moins un envoi Push réussi pour l'abonnement concerné. Cela évite de marquer une notification comme envoyée lorsqu'aucun appareil n'a effectivement accepté l'envoi.
-
-Le cron Supabase existant toutes les 5 minutes reste inchangé.
+- Nouvelle notification Push **« Présence confirmée »**.
+- Elle cible les adhérents dont le statut est **Présent** pour la semaine envoyée.
+- Le message indique : **date, créneau effectif et statut**.
+- Le créneau effectif tient compte du dernier changement de créneau **validé** pour la semaine.
+- Ajout dans Administration → Notifications d'un bloc de configuration pour « Présence confirmée ».
+- Ajout d'un bouton d'envoi manuel pour **Rappel de présence — À confirmer**.
+- Ajout d'un bouton d'envoi manuel pour **Présence confirmée — Présents**.
+- Le rappel manuel cible la **semaine suivante** et les comptes Adhérent sans réponse (l'état À confirmer inclut l'absence de ligne de réponse).
+- Les administrateurs affectés à un créneau restent inclus dans le rappel automatique V106 ; ils ne reçoivent pas la notification « Présence confirmée » réservée aux adhérents.
+- Protection anti-doublon conservée via `push_notification_log`.
+- Les actions manuelles utilisent l'authentification Supabase et sont réservées aux administrateurs.
+- Les autres notifications et fonctionnalités de V106 sont conservées.
 
 ## Déploiement
 
-1. Remplacer les fichiers de la branche `main` par ceux de cette archive.
-2. Déployer/mette à jour l'Edge Function `push-notifications` avec `supabase/functions/push-notifications/index.ts`.
-3. Conserver les secrets Supabase existants : `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `PUSH_CRON_SECRET` et les variables Supabase.
-4. Ne pas modifier le SQL V79 si les tables `push_subscriptions` et `push_notification_log` existent déjà.
-5. Après déploiement, créer une nouvelle demande de créneau et consulter les logs de l'Edge Function pendant l'exécution du cron.
+1. Publier les fichiers web V107 sur GitHub Pages.
+2. Redéployer `supabase/functions/push-notifications`.
+3. Exécuter le SQL `supabase/v99-notifications.sql` si le type `attendance_confirmed` n'existe pas encore dans `notification_settings` (l'instruction est protégée par `ON CONFLICT`).
+4. Tester depuis Administration → Notifications.
 
+## Tests manuels recommandés
 
-## V87 — Nouvelle connexion
-- Connexion en 3 niveaux : Mode → Créneau → Liste des adhérents/comptes.
-- Première connexion : confirmation par adresse mail paramétrée (3 premiers + 3 derniers caractères affichés, milieu masqué), puis changement obligatoire du mot de passe.
-- Connexions suivantes : sélection du nom puis saisie du mot de passe personnel.
-- Nouvelle Edge Function `auth-gateway` pour charger l’annuaire de connexion et authentifier sans exposer les adresses mail complètes dans le navigateur.
-
-## V88 — Correction connexion
-- Suppression de l'ancienne définition de `performLogin` qui écrasait la nouvelle connexion V87.
-- L'ancien `v53LoginOverlay` redirige désormais vers la nouvelle page de connexion.
-- La déconnexion locale et Supabase ramène systématiquement vers la nouvelle page.
-- Cache Service Worker et version de l'application passés en V88.
-
-
-V91 : réparation automatique de `profiles.auth_email` depuis Supabase Auth pour les anciens comptes, sans bloquer la connexion si ce champ est vide.
-
-## V100 — Corrections demandées
-- Le compteur « comptes existants » par créneau inclut désormais les administrateurs actifs affectés à un créneau.
-- Dans la page « Présences » uniquement, les noms sont affichés sous la forme « Prénom N. ».
-
-## V102 — Anonymisation Présences selon le mode
-- Mode Adhérent : affichage des noms sous la forme « Prénom N. » dans Présences.
-- Modes Encadrant et Administrateur : affichage des noms complets dans Présences.
-
-## V103 — Anonymisation Présences en mode Adhérent
-- Le mode Adhérent anonymise systématiquement les noms dans la page Présences, y compris lors d'une bascule depuis Encadrant/Administrateur.
-- Les modes Encadrant et Administrateur conservent les noms complets.
-- Reconnaissance des formats « Prénom Nom » et « NOM Prénom ».
-
-## V104 — Calendrier et événements
-- « Pas de cours » est désormais affiché « Libre » dans le calendrier.
-- Ajout d’événements sur une période, avec choix toutes les semaines ou une semaine sur deux.
-
-## V105 — Ajout d’événements visible
-- Formulaire d’ajout d’événement directement visible dans le calendrier.
-- Date de début et date de fin.
-- Option « Une semaine sur deux ».
-
-
-## V106 — Rappel de présence corrigé
-
-V106 conserve les fonctionnalités de V105 et corrige la logique de la notification **Rappel de présence** dans `supabase/functions/push-notifications/index.ts`.
-
-- La semaine ciblée est toujours **la semaine suivante** : le lundi suivant + 7 jours, quel que soit le jour d'envoi configuré.
-- Le jour et la plage horaire proviennent de `notification_settings`.
-- Une réponse `Présent`, `Absent` ou `À confirmer` empêche le rappel.
-- Les **adhérents actifs** sont ciblés s'ils ont un créneau 1/2/3.
-- Les **administrateurs actifs affectés à un créneau 1/2/3** sont également ciblés.
-- Les encadrants ne sont pas ciblés par le rappel de présence.
-- Les logs Supabase indiquent la fenêtre, la semaine ciblée, le nombre de profils éligibles, les réponses déjà présentes, les profils sans créneau et les envois réussis/échoués.
-- La protection contre les doublons est atomique grâce à la contrainte unique existante de `push_notification_log`; une réservation est supprimée si aucun push n'a été réellement envoyé afin de permettre un nouvel essai dans la fenêtre.
-- Les autres notifications (demandes et décisions) conservent leur comportement et bénéficient également de la réservation atomique anti-doublon.
-
-### Déploiement
-
-1. Remplacer/déployer uniquement l'Edge Function `push-notifications` avec `supabase/functions/push-notifications/index.ts`.
-2. Aucun nouveau SQL n'est nécessaire si les tables `push_subscriptions`, `push_notification_log` et `notification_settings` existent déjà comme en V105.
-3. Le Cron `*/5 * * * *` reste inchangé.
+- Avec un adhérent en **À confirmer** pour la semaine suivante : cliquer sur « Envoyer maintenant · À confirmer » et vérifier la réception.
+- Avec un adhérent **Présent** sur la semaine affichée : cliquer sur « Envoyer maintenant · Présents » et vérifier un message du type :
+  `15/09/2026 · Créneau 2 · Présent`.
+- Valider ensuite un changement de créneau et relancer : la notification utilise le créneau effectif validé et la clé anti-doublon est différente.
+- Relancer sans modification : aucune seconde notification identique ne doit être envoyée.

@@ -107,7 +107,8 @@ const DEFAULT_NOTIFICATION_SETTINGS={
   new_slot_request:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
   new_status_request:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
   slot_request_decision:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
-  status_request_decision:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"}
+  status_request_decision:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
+  attendance_confirmed:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"}
 };
 Object.keys(DEFAULT_NOTIFICATION_SETTINGS).forEach(k=>{if(!notificationSettings[k]) notificationSettings[k]={...DEFAULT_NOTIFICATION_SETTINGS[k]};});
 let appUsers=readStorageJson("sportclub-users-v1",null)||{
@@ -1152,7 +1153,8 @@ const NOTIFICATION_DEFS=[
  {key:"new_slot_request",title:"Nouvelle demande de créneau",desc:"Informe les encadrants et administrateurs d’une nouvelle demande de changement de créneau."},
  {key:"new_status_request",title:"Nouvelle demande de présence",desc:"Informe les encadrants et administrateurs d’une demande de modification de présence."},
  {key:"slot_request_decision",title:"Décision sur une demande de créneau",desc:"Informe l’adhérent lorsqu’une demande de créneau est validée, refusée ou annulée."},
- {key:"status_request_decision",title:"Décision sur une demande de présence",desc:"Informe l’adhérent lorsqu’une demande de présence est validée, refusée ou annulée."}
+ {key:"status_request_decision",title:"Décision sur une demande de présence",desc:"Informe l’adhérent lorsqu’une demande de présence est validée, refusée ou annulée."},
+ {key:"attendance_confirmed",title:"Présence confirmée",desc:"Informe les adhérents ayant répondu Présent avec la date, le créneau effectif et le statut. L’envoi peut être déclenché manuellement ci-dessous."}
 ];
 function saveNotificationSettings(){writeStorageJson("sportclub-notification-settings",notificationSettings);}
 function notificationSetting(key){return notificationSettings[key]||DEFAULT_NOTIFICATION_SETTINGS[key];}
@@ -1171,11 +1173,29 @@ function updateNotificationSetting(key,field,value){
  const sb=v53Client(); if(sb&&v53User()){sb.from("notification_settings").upsert({notification_type:key,active:s.active,days:s.days,start_time:s.start,end_time:s.end,updated_at:new Date().toISOString()},{onConflict:"notification_type"}).then(({error})=>{if(error)toast("Paramètre non enregistré : "+error.message);});}
  addActionLog("Paramètre notification",`${key} · ${field}`);
 }
+async function triggerNotificationAction(action){
+ if(!canAdmin()) return toast("Réservé à l’administrateur.");
+ const sb=v53Client(); if(!sb||!v53User()) return toast("Connexion Supabase requise.");
+ const label=action==="manual_attendance_reminder"?"Rappel de présence":"Présence confirmée";
+ if(!confirm(`Déclencher maintenant l’envoi de « ${label} » ?`)) return;
+ try{
+   const body={action};
+   if(action==="manual_attendance_confirmed") body.week=weekKey();
+   const {data,error}=await sb.functions.invoke("push-notifications",{body});
+   if(error) throw error;
+   if(data?.error) throw new Error(data.error);
+   const sent=Number(data?.sent||0);
+   toast(`${label} : ${sent} notification${sent>1?"s":""} envoyée${sent>1?"s":""}.`);
+   addActionLog("Envoi manuel notification",`${label} · semaine ${data?.week||weekKey()} · ${sent} envoi(s)`);
+ }catch(e){ console.error("[V107] Envoi notification impossible",e); toast(`Échec de l’envoi : ${e?.message||"erreur inconnue"}`); }
+}
+window.triggerNotificationAction=triggerNotificationAction;
+
 function renderNotifications(){
  const el=document.getElementById("notificationsView"); if(!el)return;
  if(!canAdmin()){el.innerHTML="";return;}
- const cards=NOTIFICATION_DEFS.map(n=>{const s=notificationSetting(n.key);return `<div class="card notification-config-card"><div class="notification-config-head"><div><p class="eyebrow">NOTIFICATION</p><h3>${esc(n.title)}</h3><div class="muted">${esc(n.desc)}</div></div><label class="notification-toggle"><input type="checkbox" ${s.active?"checked":""} onchange="updateNotificationSetting('${n.key}','active',this.checked)"><span>${s.active?"Activée":"Désactivée"}</span></label></div><div class="notification-config-fields"><label>Heure de début<input type="time" value="${esc(s.start)}" onchange="updateNotificationSetting('${n.key}','start',this.value)"></label><label>Heure de fin<input type="time" value="${esc(s.end)}" onchange="updateNotificationSetting('${n.key}','end',this.value)"></label></div><div class="notification-days"><span class="field-label">Jours d’envoi</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" ${s.days.includes(d)?"checked":""} onchange="updateNotificationDays('${n.key}')" data-notif-day="${n.key}" value="${d}">${notificationDayName(d).slice(0,3)}</label>`).join("")}</div></div></div>`}).join("");
- el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Notifications</h1><p>Activez ou désactivez les notifications Push et définissez les jours et horaires d’envoi.</p></div></section><div class="notification-info card"><strong>Fonctionnement</strong><div class="muted">Les notifications sont envoyées automatiquement par Supabase. Les demandes et décisions sont traitées dans la fenêtre horaire définie ci-dessous.</div></div>${cards}`;
+ const cards=NOTIFICATION_DEFS.map(n=>{const s=notificationSetting(n.key); const manual=n.key==="attendance_reminder"||n.key==="attendance_confirmed"; const manualBtn=n.key==="attendance_reminder"?`<button class="primary notification-send-btn" onclick="triggerNotificationAction('manual_attendance_reminder')">↗ Envoyer maintenant · À confirmer</button>`:n.key==="attendance_confirmed"?`<button class="primary notification-send-btn" onclick="triggerNotificationAction('manual_attendance_confirmed')">↗ Envoyer maintenant · Présents</button>`:""; return `<div class="card notification-config-card"><div class="notification-config-head"><div><p class="eyebrow">NOTIFICATION</p><h3>${esc(n.title)}</h3><div class="muted">${esc(n.desc)}</div></div><label class="notification-toggle"><input type="checkbox" ${s.active?"checked":""} onchange="updateNotificationSetting('${n.key}','active',this.checked)"><span>${s.active?"Activée":"Désactivée"}</span></label></div><div class="notification-config-fields"><label>Heure de début<input type="time" value="${esc(s.start)}" onchange="updateNotificationSetting('${n.key}','start',this.value)"></label><label>Heure de fin<input type="time" value="${esc(s.end)}" onchange="updateNotificationSetting('${n.key}','end',this.value)"></label></div><div class="notification-days"><span class="field-label">Jours d’envoi</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" ${s.days.includes(d)?"checked":""} onchange="updateNotificationDays('${n.key}')" data-notif-day="${n.key}" value="${d}">${notificationDayName(d).slice(0,3)}</label>`).join("")}</div></div>${manual?`<div class="notification-manual"><div class="muted">${n.key==="attendance_reminder"?"Cible : adhérents à confirmer pour la semaine suivante.":"Cible : adhérents ayant le statut Présent pour la semaine affichée, avec le créneau validé le cas échéant."}</div>${manualBtn}</div>`:""}</div>`}).join("");
+ el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Notifications</h1><p>Activez ou désactivez les notifications Push et définissez les jours et horaires d’envoi.</p></div></section><div class="notification-info card"><strong>Fonctionnement</strong><div class="muted">Les notifications sont envoyées automatiquement par Supabase. Les deux notifications de présence peuvent aussi être déclenchées manuellement. Le rappel cible les « À confirmer » de la semaine suivante ; « Présence confirmée » cible les Présents de la semaine affichée.</div></div>${cards}`;
 }
 function updateNotificationDays(key){const vals=[...document.querySelectorAll(`input[data-notif-day="${key}"]:checked`)].map(x=>Number(x.value));updateNotificationSetting(key,"days",vals);}
 function renderAdminTools(){

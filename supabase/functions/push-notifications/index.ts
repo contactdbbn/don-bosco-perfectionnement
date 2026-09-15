@@ -14,7 +14,8 @@ const DEFAULT_SETTINGS: Record<string, {active:boolean,days:number[],start:strin
   new_slot_request:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
   new_status_request:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
   slot_request_decision:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
-  status_request_decision:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'}
+  status_request_decision:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
+  attendance_confirmed:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'}
 }
 async function loadNotificationSettings(){
   const {data,error}=await admin.from('notification_settings').select('notification_type,active,days,start_time,end_time')
@@ -176,6 +177,154 @@ async function deliverOnce(profileId:string, type:string, eventKey:string, title
     await releaseNotification(profileId,type,eventKey)
     throw e
   }
+}
+
+
+async function authenticateAdmin(req: Request) {
+  const user = await authenticateUser(req)
+  if (!user) return null
+  const { data: profile, error } = await admin
+    .from('profiles')
+    .select('id,role,active')
+    .eq('id', user.id)
+    .maybeSingle()
+  if (error) throw error
+  if (!profile?.active || profile.role !== 'admin') return null
+  return profile
+}
+
+function slotLabel(slot: number) {
+  return [1, 2, 3].includes(Number(slot)) ? `Créneau ${Number(slot)}` : 'Aucun créneau'
+}
+
+function formatDateFr(dateString: string) {
+  return new Date(`${dateString}T12:00:00Z`).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' })
+}
+
+async function getAttendanceEventDate(weekStart: string) {
+  const end = addDays(weekStart, 7)
+  const { data, error } = await admin
+    .from('calendar_events')
+    .select('event_date,event_type,title')
+    .gte('event_date', weekStart)
+    .lt('event_date', end)
+    .in('title', ['Cours', 'Libre'])
+    .order('event_date', { ascending: true })
+    .limit(1)
+  if (error) throw error
+  return data?.[0]?.event_date || weekStart
+}
+
+async function sendManualAttendanceReminder() {
+  const currentWeek = isoWeekMonday()
+  const nextWeek = addDays(currentWeek, 7)
+  console.log(`[push][manual_attendance_reminder] recherche semaine suivante=${nextWeek}`)
+
+  const { data: profiles, error: profilesError } = await admin
+    .from('profiles')
+    .select('id,member_id,role,display_name')
+    .eq('role', 'member')
+    .eq('active', true)
+    .not('member_id', 'is', null)
+  if (profilesError) throw profilesError
+
+  const ids = (profiles || []).map(p => Number(p.member_id)).filter(Number.isFinite)
+  const { data: members, error: membersError } = ids.length
+    ? await admin.from('members').select('id,name,habitual_slot,active').in('id', ids)
+    : { data: [], error: null }
+  if (membersError) throw membersError
+  const memberById = new Map((members || []).map(m => [Number(m.id), m]))
+
+  let eligible = 0, pending = 0, sentProfiles = 0, sent = 0, noSubscription = 0, already = 0
+  for (const p of profiles || []) {
+    const member = memberById.get(Number(p.member_id))
+    if (!member || member.active === false || ![1,2,3].includes(Number(member.habitual_slot))) continue
+    eligible++
+    const { data: attendance, error } = await admin.from('attendance')
+      .select('status').eq('week_start', nextWeek).eq('member_id', p.member_id).maybeSingle()
+    if (error) throw error
+    if (attendance?.status && String(attendance.status).trim()) {
+      if (String(attendance.status).toLowerCase() === 'pending' || String(attendance.status).toLowerCase() === 'a_confirmer' || String(attendance.status).toLowerCase() === 'à confirmer') {
+        pending++
+      } else {
+        already++
+      }
+      continue
+    }
+    // Si aucune ligne n'existe, l'adhérent est également dans l'état À confirmer.
+    pending++
+    const title = 'Rappel de présence'
+    const body = `Merci de confirmer votre présence pour la semaine du ${formatDateFr(nextWeek)}.`
+    try {
+      const delivered = await deliverOnce(p.id, 'attendance_reminder', `manual:${nextWeek}`, title, body, {
+        type: 'attendance_reminder', week: nextWeek, slot: Number(member.habitual_slot), manual: true
+      })
+      if (delivered > 0) { sent += delivered; sentProfiles++ } else noSubscription++
+    } catch (e) {
+      console.error(`[push][manual_attendance_reminder] échec profile=${p.id}`, e)
+    }
+  }
+  console.log(`[push][manual_attendance_reminder] BILAN semaine=${nextWeek} éligibles=${eligible} à_confirmer=${pending} autres_réponses=${already} profils_envoyés=${sentProfiles} appareils_envoyés=${sent} sans_abonnement=${noSubscription}`)
+  return { ok: true, type: 'attendance_reminder', week: nextWeek, eligible, pending, alreadyAnswered: already, sentProfiles, sent, noSubscription }
+}
+
+async function sendManualAttendanceConfirmed(requestedWeek?: string) {
+  const week = requestedWeek && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeek) ? mondayKey(requestedWeek) : isoWeekMonday()
+  console.log(`[push][manual_attendance_confirmed] recherche semaine=${week}`)
+  const eventDate = await getAttendanceEventDate(week)
+
+  const { data: profiles, error: profilesError } = await admin
+    .from('profiles')
+    .select('id,member_id,role,display_name')
+    .eq('role', 'member')
+    .eq('active', true)
+    .not('member_id', 'is', null)
+  if (profilesError) throw profilesError
+
+  const ids = (profiles || []).map(p => Number(p.member_id)).filter(Number.isFinite)
+  const { data: members, error: membersError } = ids.length
+    ? await admin.from('members').select('id,name,habitual_slot,active').in('id', ids)
+    : { data: [], error: null }
+  if (membersError) throw membersError
+  const memberById = new Map((members || []).map(m => [Number(m.id), m]))
+
+  let eligible = 0, present = 0, sentProfiles = 0, sent = 0, noSubscription = 0
+  for (const p of profiles || []) {
+    const member = memberById.get(Number(p.member_id))
+    if (!member || member.active === false) continue
+    eligible++
+    const { data: attendance, error } = await admin.from('attendance')
+      .select('status').eq('week_start', week).eq('member_id', p.member_id).maybeSingle()
+    if (error) throw error
+    if (String(attendance?.status || '').toLowerCase() !== 'present') continue
+    present++
+
+    let effectiveSlot = Number(member.habitual_slot)
+    const { data: move, error: moveError } = await admin.from('slot_change_requests')
+      .select('requested_slot,decided_at')
+      .eq('member_id', p.member_id)
+      .eq('week_start', week)
+      .eq('status', 'approved')
+      .order('decided_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (moveError) throw moveError
+    if (move?.requested_slot && [1,2,3].includes(Number(move.requested_slot))) effectiveSlot = Number(move.requested_slot)
+
+    const title = 'Présence confirmée'
+    const body = `${formatDateFr(eventDate)} · ${slotLabel(effectiveSlot)} · Présent`
+    const eventKey = `${week}:${eventDate}:${p.member_id}:present:${effectiveSlot}`
+    try {
+      const delivered = await deliverOnce(p.id, 'attendance_confirmed', eventKey, title, body, {
+        type: 'attendance_confirmed', week, date: eventDate, slot: effectiveSlot, status: 'present'
+      })
+      if (delivered > 0) { sent += delivered; sentProfiles++ } else noSubscription++
+    } catch (e) {
+      console.error(`[push][manual_attendance_confirmed] échec profile=${p.id}`, e)
+    }
+  }
+  console.log(`[push][manual_attendance_confirmed] BILAN semaine=${week} date=${eventDate} profils_éligibles=${eligible} présents=${present} profils_envoyés=${sentProfiles} appareils_envoyés=${sent} sans_abonnement=${noSubscription}`)
+  return { ok: true, type: 'attendance_confirmed', week, date: eventDate, eligible, present, sentProfiles, sent, noSubscription }
 }
 
 async function dispatch() {
@@ -350,6 +499,14 @@ export default {
         const message = 'Les notifications Push sont correctement configurées sur cet appareil.'
         const sent = await sendToProfile(user.id, title, message, { type:'test' })
         return json({ ok:true, sent })
+      }
+      if (action === 'manual_attendance_reminder') {
+        if (!await authenticateAdmin(req)) return json({ error: 'Réservé à l’administrateur.' }, 403)
+        return json(await sendManualAttendanceReminder())
+      }
+      if (action === 'manual_attendance_confirmed') {
+        if (!await authenticateAdmin(req)) return json({ error: 'Réservé à l’administrateur.' }, 403)
+        return json(await sendManualAttendanceConfirmed(body?.week))
       }
       return json({ error: 'Action inconnue.' }, 400)
     } catch (e) {
