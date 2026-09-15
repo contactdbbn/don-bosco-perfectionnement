@@ -1269,9 +1269,11 @@ function memberDirectoryCard(m){
  const account=v63AccountStatus[Number(m.id)]||{};
  const login=account.last_sign_in_at?fmtDateTime(account.last_sign_in_at):"Jamais";
  const passwordState=account.password_changed_at?`Mot de passe modifié le ${esc(fmtDateTime(account.password_changed_at))}`:(account.must_change_password?`Mot de passe temporaire à changer`:(account.user_id?`État du mot de passe non renseigné`:""));
+ const credentialEmailState=account.credentials_email_sent_at?`Dernier envoi des identifiants : ${esc(fmtDateTime(account.credentials_email_sent_at))}`:`Aucun envoi des identifiants`;
+
  const slotText=role==="admin"?(m.slot?slotLabel(m.slot):"Aucun"):(role==="member"?slotLabel(m.slot):"Aucun");
- const accountActions=canManageRoles()?`${m.authEmail?`<button onclick="manageMemberAccount(${m.id})">Gérer le compte</button>`:`<button class="primary" onclick="createMemberAccount(${m.id})">Créer le compte</button>`}<button onclick="changeMemberPassword(${m.id})">Réinitialiser le mot de passe</button><button class="danger" onclick="removeMember(${m.id})">Désactiver</button>`:"";
- return `<article class="card member-directory-card-item"><div class="member-directory-main"><div class="member-directory-identity"><strong>${esc(m.name)}</strong><span class="member-role-pill">${esc(roleLabel)}</span></div><div class="member-directory-info"><div><span class="field-label">Rôle</span><strong>${esc(roleLabel)}</strong></div><div><span class="field-label">Créneau habituel</span><strong>${esc(slotText)}</strong></div><div><span class="field-label">Compte adhérent</span><strong>${m.authEmail?"Compte créé":"Compte non créé"}</strong>${m.authEmail?`<span class="muted">${esc(m.authEmail)}</span>`:""}</div><div><span class="field-label">Dernière connexion</span><strong>${esc(login)}</strong>${passwordState?`<span class="muted">${esc(passwordState)}</span>`:""}</div></div></div><div class="member-directory-actions">${accountActions}</div>${canManageRoles()?`<div class="member-directory-settings"><span class="field-label">Modifier le rôle</span><select onchange="setMemberRole(${m.id},this.value)"><option value="member" ${role==='member'?"selected":""}>Adhérent</option><option value="coach" ${role==='coach'?"selected":""}>Encadrant</option><option value="admin" ${role==='admin'?"selected":""}>Administrateur</option></select><span class="field-label">Créneau habituel</span>${role==='admin'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="" ${!m.slot?"selected":""}>Aucun</option><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:role==='member'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:`<span class="muted">Sans créneau</span>`}</div>`:""}</article>`;
+ const accountActions=canManageRoles()?`${m.authEmail?`<button onclick="manageMemberAccount(${m.id})">Gérer le compte</button><button class="primary" onclick="sendAccountCredentialsEmail(${m.id})">✉ Envoyer les identifiants</button>`:`<button class="primary" onclick="createMemberAccount(${m.id})">Créer le compte</button>`}<button onclick="changeMemberPassword(${m.id})">Réinitialiser le mot de passe</button><button class="danger" onclick="removeMember(${m.id})">Désactiver</button>`:"";
+ return `<article class="card member-directory-card-item"><div class="member-directory-main"><div class="member-directory-identity"><strong>${esc(m.name)}</strong><span class="member-role-pill">${esc(roleLabel)}</span></div><div class="member-directory-info"><div><span class="field-label">Rôle</span><strong>${esc(roleLabel)}</strong></div><div><span class="field-label">Créneau habituel</span><strong>${esc(slotText)}</strong></div><div><span class="field-label">Compte adhérent</span><strong>${m.authEmail?"Compte créé":"Compte non créé"}</strong>${m.authEmail?`<span class="muted">${esc(m.authEmail)}</span>`:""}</div><div><span class="field-label">Dernière connexion</span><strong>${esc(login)}</strong>${passwordState?`<span class="muted">${esc(passwordState)}</span>`:""}</div><div><span class="field-label">Email des identifiants</span><strong>${esc(credentialEmailState)}</strong></div></div></div><div class="member-directory-actions">${accountActions}</div>${canManageRoles()?`<div class="member-directory-settings"><span class="field-label">Modifier le rôle</span><select onchange="setMemberRole(${m.id},this.value)"><option value="member" ${role==='member'?"selected":""}>Adhérent</option><option value="coach" ${role==='coach'?"selected":""}>Encadrant</option><option value="admin" ${role==='admin'?"selected":""}>Administrateur</option></select><span class="field-label">Créneau habituel</span>${role==='admin'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="" ${!m.slot?"selected":""}>Aucun</option><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:role==='member'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:`<span class="muted">Sans créneau</span>`}</div>`:""}</article>`;
 }
 
 function notificationDayName(d){return ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"][Number(d)]||d;}
@@ -2003,7 +2005,7 @@ async function v53LoadRemote(){
   (rows.calendar_weeks||[]).forEach(w=>{calendarData.weeks[w.week_start]={type:v53MapWeekType(w.week_type),label:w.label||w.week_type,reportDate:w.report_date||null};});
   calendarData.events=(rows.calendar_events||[]).map(e=>({id:Number(e.id),date:e.event_date,eventType:e.event_type,title:e.title,reportDate:e.report_date||null}));
   ensureCalendarCourseMondays();
-  if(profile.role==='admin'){ await v63LoadAccountStatus(); await loadNotificationSettings(); }
+  if(profile.role==='admin'){ await v63LoadAccountStatus(); await v121LoadCredentialEmailStatus(); await loadNotificationSettings(); }
   v53.hydrated=true;
   return true;
 }
@@ -2230,6 +2232,43 @@ async function v63LoadAccountStatus(){
    console.warn('[V63] Statut des comptes impossible à charger.',e);
    v63AccountStatus={};
  }
+}
+
+async function v121LoadCredentialEmailStatus(){
+  if(!canAdmin()) return;
+  const sb=v53Client(); if(!sb || !v53User()) return;
+  try{
+    const {data,error}=await sb.functions.invoke('send-account-email',{body:{action:'list_status'}});
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    (data?.accounts||[]).forEach(a=>{
+      const id=Number(a.member_id);
+      if(id){
+        v63AccountStatus[id]=Object.assign({},v63AccountStatus[id]||{}, {credentials_email_sent_at:a.credentials_email_sent_at||null});
+      }
+    });
+  }catch(e){ console.warn('[V121] Statut des emails impossible à charger.',e); }
+}
+
+async function sendAccountCredentialsEmail(id){
+  if(!canAdmin()) return toast('Seul l’administrateur peut envoyer les identifiants.');
+  const m=db.members.find(x=>Number(x.id)===Number(id)); if(!m)return;
+  if(!m.authEmail) return toast('Ce compte n’a pas encore d’adresse email.');
+  const email=m.authEmail;
+  if(!confirm(`Envoyer les identifiants de connexion à ${m.name} (${email}) ?\n\nLe mot de passe temporaire sera réinitialisé à 123456 et devra être changé à la première connexion.`)) return;
+  const sb=v53Client(); if(!sb || !v53User()) return toast('Supabase n’est pas disponible.');
+  try{
+    const {data,error}=await sb.functions.invoke('send-account-email',{body:{action:'send_credentials',member_id:Number(id)}});
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    if(!v63AccountStatus[Number(id)]) v63AccountStatus[Number(id)]={};
+    v63AccountStatus[Number(id)].credentials_email_sent_at=data.credentials_email_sent_at||new Date().toISOString();
+    render();
+    toast(`Email envoyé à ${email}.`);
+  }catch(e){
+    console.error('[V121] Envoi email identifiants impossible.',e);
+    v53ToastError('Envoi de l’email impossible.',e);
+  }
 }
 
 async function createMemberAccount(id){
