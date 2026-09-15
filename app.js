@@ -119,8 +119,21 @@ function saveUsers(){writeStorageJson("sportclub-users-v1",appUsers);}
 if(!localStorage.getItem("sportclub-users-v1")){ saveUsers(); }
 function getMemberRole(m){return m?.role||"member";}
 function slotLabel(slot){ const n=Number(slot); return [1,2,3].includes(n) ? SLOT_NAMES[n-1] : "Aucun créneau"; }
+function normalizeRole(role){
+ const r=String(role||"").trim().toLowerCase();
+ if(r==="admin"||r==="administrateur") return "admin";
+ if(r==="coach"||r==="encadrant") return "coach";
+ return "member";
+}
+function isAdherent(m){ return m?.active!==false && normalizeRole(m?.role)==="member"; }
+function sortByName(list){
+ return [...list].sort((a,b)=>String(a?.name||"").localeCompare(String(b?.name||""),"fr-FR",{sensitivity:"base"}));
+}
+function sortedSlotNumbers(){
+ return [1,2,3].sort((a,b)=>slotLabel(a).localeCompare(slotLabel(b),"fr-FR",{numeric:true,sensitivity:"base"}));
+}
 function getSlotQuota(slot){ const n=Number(slot); return Math.max(0,Math.min(QUOTA_MAX,Number(db.quotas?.[n]??30))); }
-function getActiveSlotCount(slot,excludeId=null){ return db.members.filter(x=>x.active&&getMemberRole(x)==="member"&&Number(x.slot)===Number(slot)&&(excludeId===null||x.id!==Number(excludeId))).length; }
+function getActiveSlotCount(slot,excludeId=null){ return db.members.filter(x=>isAdherent(x)&&Number(x.slot)===Number(slot)&&(excludeId===null||x.id!==Number(excludeId))).length; }
 function setMemberHabitualSlot(id,slot){
  if(!canManageRoles()) return toast("Seul l'administrateur peut gérer les créneaux habituels.");
  const m=db.members.find(x=>x.id===Number(id)); if(!m)return;
@@ -197,6 +210,7 @@ const getMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>m.m
 // Inclut les demandes traitées afin que l'adhérent puisse voir leur statut
 // directement sur Présences et Mon suivi.
 const getLatestMoveForMember=(memberId,key=weekKey())=>getWeekMoves(key).filter(m=>Number(m.memberId)===Number(memberId)).sort((a,b)=>Number(b.createdAt||b.id||0)-Number(a.createdAt||a.id||0))[0]||null;
+const getVisibleMoveForMember=(memberId,key=weekKey())=>{ const latest=getLatestMoveForMember(memberId,key); return latest&&latest.status!=="cancelled"?latest:null; };
 function slotRequestStatusLabel(status){
  if(status==="pending") return "en attente de validation";
  if(status==="approved") return "acceptée";
@@ -209,8 +223,8 @@ const getEffectiveSlot=(memberId,key=weekKey())=>{
  const move=getWeekMoves(key).filter(x=>x.memberId===Number(memberId)&&x.status==="approved").sort((a,b)=>b.approvedAt-b.approvedAt||b.id-a.id)[0];
  return move?Number(move.to):Number(m.slot);
 };
-const getControlPresence=(slot,key=weekKey())=>db.members.filter(m=>m.active&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatusForWeek(m.id,key)==="present").length;
-const getControlAbsent=(slot,key=weekKey())=>db.members.filter(m=>m.active&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatus(m.id)==="absent").length;
+const getControlPresence=(slot,key=weekKey())=>db.members.filter(m=>isAdherent(m)&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatusForWeek(m.id,key)==="present").length;
+const getControlAbsent=(slot,key=weekKey())=>db.members.filter(m=>isAdherent(m)&&getEffectiveSlot(m.id,key)===Number(slot)&&getStatus(m.id)==="absent").length;
 const getDeclaredPresenceCount=(memberId)=>Object.entries(db.attendance||{}).filter(([key,value])=>key.endsWith("_"+memberId)&&value==="present").length;
 const getChangeCount=(memberId)=>Number(db.members.find(m=>m.id===Number(memberId))?.changeCount||0);
 const getActualAttendance=(slot)=>Number(db.actualAttendance[weekKey()+"_"+slot] ?? 0);
@@ -449,16 +463,18 @@ function renderDashboard(){
    <div class="row"><div><strong>${canAdmin()?"Mode administrateur":(canCoach()?"Mode encadrant":"Mode adhérent")}</strong>
    <div class="muted">${canCoach()
      ?"Vous pouvez gérer les présences et les fonctions d’encadrement autorisées."
-     :"Vous pouvez modifier uniquement votre propre présence. Les statuts des autres adhérents sont visibles en lecture seule."}</div></div>
+     :"Vous pouvez modifier uniquement votre propre présence. Les statuts des autres adhérents sont visibles en lecture seule."}</div>
+   ${currentRole==="member"?`<div class="muted">Créneau inscrit : <strong>${esc(slotLabel(currentMember()?.slot))}</strong></div>`:""}
+   </div>
    ${currentRole==="member"?`<span class="auth-user">${esc(currentMember()?.name||"")}</span>`:""}
    </div></div>`;
 
  const courseWeek=isAttendanceWeek();
  const absenceCard=currentRole==="member"?renderAbsencePeriodCard():"";
- const slots=SLOT_NAMES.map((name,si)=>{
-   const slotNumber=si+1;
+ const slots=sortedSlotNumbers().map(slotNumber=>{
+   const name=slotLabel(slotNumber);
    if(selectedSlots.size && !selectedSlots.has(slotNumber)) return "";
-   const list=db.members.filter(m=>m.active&&getEffectiveSlot(m.id)===slotNumber);
+   const list=sortByName(db.members.filter(m=>isAdherent(m)&&getEffectiveSlot(m.id)===slotNumber));
    const realSlot=getControlPresence(slotNumber);
    const quota=Math.max(0,Math.min(QUOTA_MAX,Number(db.quotas?.[slotNumber]??30)));
    const quotaPercent=quota>0 ? Math.min(100,list.length/quota*100) : (list.length>0 ? 100 : 0);
@@ -482,9 +498,9 @@ function renderDashboard(){
 
 }
 function renderRealDashboard(){
- const rows=SLOT_NAMES.map((name,si)=>{
-   const slot=si+1;
-   const list=db.members.filter(m=>m.active&&getEffectiveSlot(m.id)===slot);
+ const rows=sortedSlotNumbers().map(slot=>{
+   const name=slotLabel(slot);
+   const list=sortByName(db.members.filter(m=>isAdherent(m)&&getEffectiveSlot(m.id)===slot));
    const present=list.filter(m=>getStatus(m.id)==="present").length;
    const absent=list.filter(m=>getStatus(m.id)==="absent").length;
    const pending=list.filter(m=>getStatus(m.id)==="pending").length;
@@ -614,16 +630,19 @@ function memberHistoryRow(event,me){
  const pendingReq=(db.statusRequests||[]).find(r=>Number(r.memberId)===Number(me.id)&&r.week===weekKey&&r.status==='pending');
  const effectiveSlot=getEffectiveSlot(me.id,weekKey);
  const approvedMove=getWeekMoves(weekKey).filter(r=>Number(r.memberId)===Number(me.id)&&r.status==='approved').sort((a,b)=>Number(b.approvedAt||b.createdAt||b.id||0)-Number(a.approvedAt||a.createdAt||a.id||0))[0];
- const latestMove=getLatestMoveForMember(me.id,weekKey);
+ const latestMove=getVisibleMoveForMember(me.id,weekKey);
  const slotInfo=approvedMove&&effectiveSlot?`<span class="history-slot">Créneau effectif : ${SLOT_NAMES[effectiveSlot-1]}</span>`:'';
  const moveRequestInfo=latestMove?`<div class="request-pending member-slot-request-status">🔄 <strong>Demande de changement de créneau : ${slotRequestStatusLabel(latestMove.status)}</strong> · ${SLOT_NAMES[Number(latestMove.from)-1]||slotLabel(latestMove.from)} → ${SLOT_NAMES[Number(latestMove.to)-1]||slotLabel(latestMove.to)}${latestMove.status==='approved'?` · créneau effectif : ${SLOT_NAMES[effectiveSlot-1]||slotLabel(effectiveSlot)}`:''}</div>`:'';
+ const moveOptions=SLOT_NAMES.map((name,i)=>i+1).filter(slot=>slot!==Number(me.slot));
+ const moveRequestActions=(!past&&!locked && st==='present' && !latestMove)?`<div class="member-history-slot-change"><span class="member-history-slot-change-label">🔄 Demander un changement de créneau :</span><div class="history-actions member-slot-change-actions">${moveOptions.map(slot=>`<button class="history-slot-choice" onclick="requestSlotForWeek(${me.id},${slot},'${weekKey}')">${SLOT_NAMES[slot-1]}</button>`).join('')}</div></div>`:'';
  const absencePeriod=(db.absencePeriods||[]).find(a=>Number(a.memberId)===Number(me.id)&&a.start<=weekKey&&a.end>=weekKey);
  const absenceIndicator=absencePeriod?`<div class="absence-warning" title="Une période d’absence couvre cette semaine.">⚠️ <strong>Période d’absence active</strong><span> · ${fmt(absencePeriod.start)} → ${fmt(absencePeriod.end)}</span></div>`:'';
  const statusButtons=`<div class="history-actions"><button class="${st==='present'?'primary':''}" onclick="setStatusForWeek(${me.id},'present','${weekKey}')">Présent</button><button class="${st==='absent'?'danger':''}" onclick="setStatusForWeek(${me.id},'absent','${weekKey}')">Absent</button><button class="${st==='pending'?'secondary':''}" onclick="setStatusForWeek(${me.id},'pending','${weekKey}')">À confirmer</button></div>`;
  const requestButtons=`<div class="history-actions"><span class="muted">Demander une modification :</span><button onclick="requestStatusChangeForEvent(${me.id},'present','${eventDate}','${weekKey}')">Présent</button><button onclick="requestStatusChangeForEvent(${me.id},'absent','${eventDate}','${weekKey}')">Absent</button><button onclick="requestStatusChangeForEvent(${me.id},'pending','${eventDate}','${weekKey}')">À confirmer</button></div>`;
  const pendingLabel=pendingReq?`<div class="muted request-pending">⏳ Statut demandé : <strong>${labels[pendingReq.requestedStatus]}</strong> — en attente de validation</div>`:'';
  const controls=(!past&&!locked)?statusButtons:(past?`<div class="muted">Statut historique — modification directe réservée à l’administrateur</div>${request?(pendingReq?pendingLabel:requestButtons):`<div class="muted">Aucune réponse enregistrée : aucune demande de modification à envoyer.</div>`}`:`<div class="muted">Statut verrouillé après 19h30</div>${request?(pendingReq?pendingLabel:requestButtons):``}`);
- return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}${moveRequestInfo}${absenceIndicator}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${controls}</div></div>`;
+ const historyControls=controls+moveRequestActions;
+ return `<div class="history-row"><div class="history-date"><strong>${fmt(eventDate)}</strong><span class="history-type">${type}</span>${slotInfo}${moveRequestInfo}${absenceIndicator}</div><div class="status ${st}"><span class="dot"></span>${labels[st]}</div><div class="history-control">${historyControls}</div></div>`;
 }
 if(!db.sessionObjectives||typeof db.sessionObjectives!=='object') db.sessionObjectives={};
 function getCourseDates(){
@@ -723,7 +742,7 @@ function renderMemberHistory(){
  const stats=(type)=>{const a=events.filter(e=>e.type===type);const c={present:0,absent:0,pending:0};a.forEach(e=>c[getStatusForWeek(me.id,e.week)]++);return {...c,total:a.length};};
  const course=stats('Cours'), libre=stats('Libre');
  const statCard=(title,x)=>`<div class="stat-card"><strong>${x.total}</strong><span>${title}</span><div class="stat-mini"><span>Présent <b>${x.present}</b></span><span>Absent <b>${x.absent}</b></span><span>À confirmer <b>${x.pending}</b></span></div></div>`;
- el.innerHTML=`<div class="card member-history-head"><div><p class="eyebrow">MON SUIVI</p><h2>Mes cours et mes présences</h2><div class="muted">Toutes les dates configurées dans le calendrier avec <strong>Cours</strong> ou <strong>Libre</strong>.</div></div><div class="history-summary"><strong>${events.length}</strong><span>dates</span></div></div>
+ el.innerHTML=`<div class="card member-history-head"><div><p class="eyebrow">MON SUIVI</p><h2>Mes cours et mes présences</h2><div class="muted">Créneau habituel : <strong>${esc(slotLabel(me.slot))}</strong></div><div class="muted">Toutes les dates configurées dans le calendrier avec <strong>Cours</strong> ou <strong>Libre</strong>.</div></div><div class="history-summary"><strong>${events.length}</strong><span>dates</span></div></div>
  <div class="stats-grid">${statCard('Cours',course)}${statCard('Libre',libre)}</div>
  <div class="card history-list"><div class="history-legend"><span><i class="status-dot present"></i> Présent</span><span><i class="status-dot absent"></i> Absent</span><span><i class="status-dot pending"></i> À confirmer</span><span class="muted">Les dates futures sont modifiables directement.</span></div>${events.length?events.map(e=>memberHistoryRow(e,me)).join(''):`<div class="empty">Aucune date Cours ou Libre dans le calendrier.</div>`}</div>`;
 }
@@ -777,7 +796,7 @@ function personHtml(m){
  const editable=canEditAttendanceForDate(m.id,key);
  const locked=!canCoach() && isStatusLockedAt1930(m.id,key);
  const move=getMoveForMember(m.id);
- const latestMove=getLatestMoveForMember(m.id,key);
+ const latestMove=getVisibleMoveForMember(m.id,key);
  const absencePeriod=isMemberAbsentByPeriod(m.id,key);
  const otherSlots=SLOT_NAMES.map((name,i)=>i+1).filter(slot=>slot!==m.slot);
  const moveLabel=latestMove?`<span class="request-pending">🔄 Demande de changement : <strong>${slotRequestStatusLabel(latestMove.status)}</strong> · ${SLOT_NAMES[Number(latestMove.from)-1]||slotLabel(latestMove.from)} → ${SLOT_NAMES[Number(latestMove.to)-1]||slotLabel(latestMove.to)}${latestMove.status==="approved"?` · créneau effectif : ${SLOT_NAMES[getEffectiveSlot(m.id,key)-1]||slotLabel(getEffectiveSlot(m.id,key))}`:""}</span>`:"";
@@ -800,7 +819,7 @@ function personHtml(m){
    && st!=="absent"&&!move
    ? `<div class="slot-request"><span class="muted">Présent mais souhaite jouer sur :</span>${otherSlots.map(slot=>`<button onclick="requestSlot(${m.id},${slot})">${SLOT_NAMES[slot-1]}</button>`).join("")}</div>` : "";
  return `<div class="person">
-   <div><div class="name">${esc(isPresenceAnonymousMode()?presenceDisplayName(m.name):m.name)}${Number(m.id)===currentMemberId?' <span class="you">Vous</span>':''}</div><div class="muted">Créneau habituel ${m.slot} · vient au créneau ${getEffectiveSlot(m.id)} cette semaine · ${getChangeCount(m.id)} changement${getChangeCount(m.id)>1?"s":""}</div>${absenceIndicator}</div>
+   <div><div class="name">${esc(isPresenceAnonymousMode()?presenceDisplayName(m.name):m.name)}${Number(m.id)===currentMemberId?' <span class="you">Vous</span>':''}</div><div class="muted">Créneau habituel : ${esc(slotLabel(m.slot))} · vient au créneau ${esc(slotLabel(getEffectiveSlot(m.id)))} cette semaine · ${getChangeCount(m.id)} changement${getChangeCount(m.id)>1?"s":""}</div>${absenceIndicator}</div>
    <div class="status ${st}"><span class="dot"></span>${labels[st]}</div>
    <div class="muted">${moveLabel || (st==="pending"?"À confirmer":"Réponse enregistrée")}</div>
    ${actions}
@@ -837,21 +856,21 @@ async function requestStatusChange(memberId,requestedStatus){
  try{ await v53SyncRemote(); }catch(e){ return; }
  render();toast("Demande de modification envoyée à l'administrateur.");
 }
-function requestSlot(memberId,to){
- const key=weekKey();
+function requestSlotForWeek(memberId,to,key=weekKey()){
  if(isMemberAbsentByPeriod(memberId,key)) return toast(ABSENCE_PERIOD_MESSAGE);
- if(!isAttendanceWeek()) return toast("Les demandes de changement sont disponibles uniquement les semaines Cours ou Libre.");
+ if(!isAttendanceWeek(key)) return toast("Les demandes de changement sont disponibles uniquement les semaines Cours ou Libre.");
  const m=db.members.find(x=>x.id===Number(memberId));
  if(!m||!canEditAttendanceForDate(memberId,key)) return toast("Les dates passées ne peuvent plus être modifiées par les adhérents.");
  if(!canCoach() && isStatusLockedAt1930(memberId,key)) return toast("Votre réponse est verrouillée après 19h30. La demande de créneau n'est plus disponible.");
- if(to===m.slot) return toast("Choisissez un autre créneau.");
- if(getStatus(memberId)==="absent") return toast("Indiquez d’abord que vous êtes présent.");
- if(getMoveForMember(memberId)) return toast("Une demande de changement existe déjà pour cette semaine.");
- const occupied=getControlPresence(to);
+ if(to===Number(m.slot)) return toast("Choisissez un autre créneau.");
+ if(getStatusForWeek(memberId,key)==="absent") return toast("Indiquez d’abord que vous êtes présent.");
+ if(getMoveForMember(memberId,key)) return toast("Une demande de changement existe déjà pour cette semaine.");
+ const occupied=getControlPresence(to,key);
  if(occupied>=20) return toast(`Impossible : ${SLOT_NAMES[to-1]} compte déjà ${occupied} présents.`);
  db.moves.push({id:Date.now(),memberId:Number(memberId),name:m.name,from:m.slot,to,week:key,status:"pending"});
  save();render();toast(`Demande pour ${SLOT_NAMES[to-1]} créée. Elle sera traitée selon la priorité des changements.`);
 }
+function requestSlot(memberId,to){ return requestSlotForWeek(memberId,to,weekKey()); }
 
 function isoDate(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`} 
 ensureCalendarCourseMondays();
@@ -1260,7 +1279,7 @@ function renderMembers(){
  all.forEach(m=>{const r=getMemberRole(m);if(countByRole[r]!=null)countByRole[r]++;});
  const stats=`<div class="members-overview"><div class="member-stat"><strong>${all.length}</strong><span>Personnes actives</span></div><div class="member-stat"><strong>${countByRole.member}</strong><span>Adhérents</span></div><div class="member-stat"><strong>${countByRole.coach}</strong><span>Encadrants</span></div><div class="member-stat"><strong>${countByRole.admin}</strong><span>Administrateurs</span></div></div>`;
  const quotaHtml=`<div class="card actual-attendance-card members-quota-card"><div class="row"><div><p class="eyebrow">CAPACITÉS</p><h2>Quotas des créneaux</h2><div class="muted">Définissez le quota permanent et visualisez le nombre d’adhérents affectés à chaque créneau.</div></div></div><div class="actual-grid">${[1,2,3].map(slot=>{const name=SLOT_NAMES[slot-1],value=getSlotQuota(slot),assigned=memberBySlot[slot]||0,accounts=accountBySlot[slot]||0;return `<div class="actual-slot"><div class="row"><div><strong>${name}</strong><div class="muted">${assigned} adhérent${assigned>1?"s":""} affecté${assigned>1?"s":""}</div><div class="muted">${accounts} compte${accounts>1?"s":""} existant${accounts>1?"s":""}</div></div><output id="quotaValue${slot}" class="actual-value">${value}</output></div><input class="actual-range" type="range" min="0" max="30" step="1" value="${value}" oninput="document.getElementById('quotaValue${slot}').value=this.value" onchange="setQuota(${slot},this.value)" aria-label="Quota du ${esc(name)}"><div class="range-scale"><span>0</span><span>15</span><span>30</span></div></div>`}).join("")}</div><div class="muted actual-help">Quota de 0 à 30 personnes par créneau.</div></div>`;
- const listHtml=`<div class="card members-directory-card"><div class="members-directory-head"><div><p class="eyebrow">RÉPERTOIRE</p><h2>Utilisateurs</h2><div class="muted">Tous les utilisateurs sont affichés ensemble, par ordre alphabétique.</div></div><button class="primary" onclick="addMember()">+ Ajouter un adhérent</button></div><div class="members-directory-filters"><div class="members-search"><label for="membersSearchInput">Rechercher</label><input id="membersSearchInput" type="search" value="${esc(window.membersSearch||"")}" placeholder="Nom de l’utilisateur…" oninput="window.membersSearch=this.value;renderMembers()" autocomplete="off"></div><label class="members-slot-filter"><span>Filtrer les créneaux</span><select onchange="setMembersSlotFilter(this.value)"><option value="all" ${membersSlotFilter==="all"?"selected":""}>Tous les créneaux</option><option value="1" ${membersSlotFilter==="1"?"selected":""}>Créneau 1</option><option value="2" ${membersSlotFilter==="2"?"selected":""}>Créneau 2</option><option value="3" ${membersSlotFilter==="3"?"selected":""}>Créneau 3</option><option value="none" ${membersSlotFilter==="none"?"selected":""}>Sans créneau</option></select></label><label class="members-slot-filter"><span>Filtrer les rôles</span><select onchange="setMembersRoleFilter(this.value)"><option value="all" ${membersRoleFilter==="all"?"selected":""}>Tous les rôles</option><option value="member" ${membersRoleFilter==="member"?"selected":""}>Adhérent</option><option value="coach" ${membersRoleFilter==="coach"?"selected":""}>Encadrant</option><option value="admin" ${membersRoleFilter==="admin"?"selected":""}>Administrateur</option></select></label></div><div class="members-directory-list">${filtered.length?filtered.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"fr",{sensitivity:"base"})).map(memberDirectoryCard).join(""):`<div class="empty">Aucun utilisateur ne correspond aux critères.</div>`}</div></div>`;
+ const listHtml=`<div class="card members-directory-card"><div class="members-directory-head"><div><p class="eyebrow">RÉPERTOIRE</p><h2>Utilisateurs</h2><div class="muted">Tous les utilisateurs sont affichés ensemble, par ordre alphabétique.</div></div><button class="primary" onclick="addMember()">+ Ajouter un adhérent</button></div><div class="members-directory-filters"><div class="members-search"><label for="membersSearchInput">Rechercher</label><input id="membersSearchInput" type="search" value="${esc(window.membersSearch||"")}" placeholder="Nom de l’utilisateur…" oninput="window.membersSearch=this.value;renderMembers()" autocomplete="off"></div><label class="members-slot-filter"><span>Filtrer les créneaux</span><select onchange="setMembersSlotFilter(this.value)"><option value="all" ${membersSlotFilter==="all"?"selected":""}>Tous les créneaux</option><option value="1" ${membersSlotFilter==="1"?"selected":""}>Créneau 1</option><option value="2" ${membersSlotFilter==="2"?"selected":""}>Créneau 2</option><option value="3" ${membersSlotFilter==="3"?"selected":""}>Créneau 3</option><option value="none" ${membersSlotFilter==="none"?"selected":""}>Sans créneau</option></select></label><label class="members-slot-filter"><span>Filtrer les rôles</span><select onchange="setMembersRoleFilter(this.value)"><option value="all" ${membersRoleFilter==="all"?"selected":""}>Tous les rôles</option><option value="member" ${membersRoleFilter==="member"?"selected":""}>Adhérent</option><option value="coach" ${membersRoleFilter==="coach"?"selected":""}>Encadrant</option><option value="admin" ${membersRoleFilter==="admin"?"selected":""}>Administrateur</option></select></label></div><div class="members-directory-list">${filtered.length?sortByName(filtered).map(memberDirectoryCard).join(""):`<div class="empty">Aucun utilisateur ne correspond aux critères.</div>`}</div></div>`;
  document.getElementById("membersView").innerHTML=quotaHtml+stats+listHtml+(canAdmin()?renderAdminTools():"");
 }
 
@@ -1350,7 +1369,7 @@ function normalizeDb(){
  [1,2,3].forEach(s=>{const n=Number(db.quotas[s]);db.quotas[s]=Number.isFinite(n)?Math.max(0,Math.min(30,n)):30;});
  ["moves","absencePeriods","statusRequests","objectiveComments","objectiveReactions","actionLog"].forEach(k=>{if(!Array.isArray(db[k]))db[k]=[];});
  ["sessionObjectives","coachNotesByDate"].forEach(k=>{if(!db[k]||typeof db[k]!=="object")db[k]={};});
- db.members.forEach((m,i)=>{m.id=Number(m.id)||i+1;m.active=m.active!==false;m.role=["member","coach","admin"].includes(m.role)?m.role:"member";m.slot=m.role==="member"?[1,2,3].includes(Number(m.slot))?Number(m.slot):1:m.role==="admin"&&[1,2,3].includes(Number(m.slot))?Number(m.slot):null;m.password=String(m.password||"1234");m.changeCount=Number(m.changeCount)||0;m.mustChangePassword=!!m.mustChangePassword;});
+ db.members.forEach((m,i)=>{m.id=Number(m.id)||i+1;m.active=m.active!==false;m.role=normalizeRole(m.role);m.slot=m.role==="member"?[1,2,3].includes(Number(m.slot))?Number(m.slot):1:m.role==="admin"&&[1,2,3].includes(Number(m.slot))?Number(m.slot):null;m.password=String(m.password||"1234");m.changeCount=Number(m.changeCount)||0;m.mustChangePassword=!!m.mustChangePassword;});
 }
 normalizeDb();
 
@@ -1642,7 +1661,7 @@ function allMembersRespondedForTargetSlot(key,slot){
  // En mode forcé, on vérifie uniquement les adhérents du créneau cible
  // de la demande. Il est inutile de bloquer une demande vers le créneau 2
  // parce qu'un adhérent du créneau 1 ou 3 n'a pas encore répondu.
- const members=db.members.filter(m=>m.active&&getMemberRole(m)==='member'&&getEffectiveSlot(m.id,key)===target);
+ const members=db.members.filter(m=>isAdherent(m)&&getEffectiveSlot(m.id,key)===target);
  return members.every(m=>hasDefinitiveResponse(m.id,key));
 }
 
@@ -1764,7 +1783,26 @@ function notifySlot(slot){
  if("Notification" in window && Notification.permission==="granted") new Notification("Don Bosco - Perfectionnement",{body:`Rappel : merci de confirmer votre présence au créneau ${slot}.`});
  else toast("Activez les notifications du navigateur pour envoyer les rappels.");
 }
+function reorderTabsForRole(){
+ const nav=document.querySelector('.top-tabs');
+ if(!nav) return;
+ const byView=view=>nav.querySelector(`.tab[data-view="${view}"]`);
+ const orders={
+   member:['dashboard','member-history','request-history','objectives','calendar','events'],
+   coach:['tdb','objectives','member-history','dashboard','moves','calendar','events'],
+   admin:['members','tdb','dashboard','moves','calendar','events','notifications']
+ };
+ const order=orders[currentRole]||orders.member;
+ // Recompose the navigation from scratch in the exact role-specific order.
+ // This also prevents hidden tabs from affecting the visible sequence.
+ const fragment=document.createDocumentFragment();
+ order.forEach(view=>{ const tab=byView(view); if(tab) fragment.appendChild(tab); });
+ nav.appendChild(fragment);
+ const presenceTab=byView('dashboard');
+ if(presenceTab) presenceTab.firstChild && (presenceTab.childNodes[0].nodeValue='Présences');
+}
 function syncTabs(){
+ reorderTabsForRole();
  const requestHistoryTab=document.getElementById("requestHistoryTab");
  if(requestHistoryTab) requestHistoryTab.style.display=(currentRole==="member")?"":"none";
  const movesTab=document.getElementById("movesTab");
@@ -1926,8 +1964,8 @@ function v53MapWeekType(t){
 function v53MapDbFromRemote(rows){
   const out={members:[],attendance:{},actualAttendance:{},quotas:{1:30,2:30,3:30},moves:[],absencePeriods:[],statusRequests:[],objectiveComments:[],objectiveReactions:[],coachNotesByDate:{},actionLog:[]};
   const profiles=rows.profiles||[];
-  const roleByMember=new Map(profiles.filter(p=>p.member_id!=null).map(p=>[Number(p.member_id),p.role]));
-  out.members=(rows.members||[]).map(m=>{const prof=profiles.find(p=>Number(p.member_id)===Number(m.id));return {id:Number(m.id),name:m.name,slot:m.habitual_slot==null?null:Number(m.habitual_slot),active:m.active!==false,changeCount:Number(m.change_count||0),role:roleByMember.get(Number(m.id))||'member',authEmail:prof?.auth_email||'',mustChangePassword:!!prof?.must_change_password};});
+  const roleByMember=new Map(profiles.filter(p=>p.member_id!=null).map(p=>[Number(p.member_id),normalizeRole(p.role)]));
+  out.members=(rows.members||[]).map(m=>{const prof=profiles.find(p=>Number(p.member_id)===Number(m.id));return {id:Number(m.id),name:m.name,slot:m.habitual_slot==null?null:Number(m.habitual_slot),active:m.active!==false,changeCount:Number(m.change_count||0),role:normalizeRole(m.role||roleByMember.get(Number(m.id))||'member'),authEmail:prof?.auth_email||'',mustChangePassword:!!prof?.must_change_password};});
   (rows.quotas||[]).forEach(q=>{out.quotas[Number(q.slot)]=Number(q.quota);});
   (rows.attendance||[]).forEach(a=>{out.attendance[`${a.week_start}_${a.member_id}`]=a.status;});
   (rows.actual_attendance||[]).forEach(a=>{out.actualAttendance[`${a.week_start}_${a.slot}`]=Number(a.count||0);});
@@ -2026,7 +2064,7 @@ async function v53SyncRemote(){
     const role=v53.role, mid=v53.memberId;
     // Tables communes : l'encadrement/admin peut synchroniser la totalité.
     if(role!=='member'){
-      const members=(db.members||[]).map(m=>({id:Number(m.id),name:m.name,habitual_slot:[1,2,3].includes(Number(m.slot))?Number(m.slot):null,active:m.active!==false,change_count:Number(m.changeCount||0)}));
+      const members=(db.members||[]).map(m=>({id:Number(m.id),name:m.name,habitual_slot:[1,2,3].includes(Number(m.slot))?Number(m.slot):null,active:m.active!==false,change_count:Number(m.changeCount||0),role:normalizeRole(m.role)}));
       if(members.length){let r=await sb.from('members').upsert(members,{onConflict:'id'});if(r.error)throw r.error;}
       const profiles=await sb.from('profiles').select('id,member_id,role,active,display_name');
       if(profiles.error) throw profiles.error;

@@ -365,6 +365,15 @@ img,svg,canvas{max-width:100%;}
 @media(max-width:900px){.members-directory-filters{grid-template-columns:1fr 1fr}.members-slot-filter{width:100%}}
 @media(max-width:700px){.members-directory-filters{grid-template-columns:1fr}}
 
+/* V129 — Créneaux de changement dans Mon suivi : boutons plus visibles */
+.member-history-slot-change{margin-top:10px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc}
+.member-history-slot-change-label{display:block;margin-bottom:7px;font-weight:800;color:var(--text);font-size:13px}
+.history-actions.member-slot-change-actions{gap:8px}
+.history-actions .history-slot-choice{min-height:40px;padding:8px 14px;border:2px solid var(--primary);border-radius:9px;background:#fff;color:var(--primary);font-weight:800;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.history-actions .history-slot-choice:hover{background:#eef2ff}
+.history-actions .history-slot-choice:focus-visible{outline:3px solid rgba(37,99,235,.25);outline-offset:2px}
+@media(max-width:800px){.member-history-slot-change{padding:11px}.history-actions .history-slot-choice{flex:1;min-width:120px;min-height:44px;font-size:14px}}
+
 /* V99 — Administration / Notifications */
 .notification-config-card{padding:20px}.notification-config-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.notification-config-head h3{margin:0 0 6px}.notification-toggle{display:flex;align-items:center;gap:8px;font-weight:800;white-space:nowrap}.notification-toggle input{width:18px;height:18px}.notification-config-fields{display:grid;grid-template-columns:repeat(2,minmax(160px,240px));gap:14px;margin-top:18px}.notification-config-fields label,.notification-days{display:grid;gap:6px}.notification-days{margin-top:18px}.field-label{font-size:12px;color:var(--muted);font-weight:800}.notification-day-list{display:flex;flex-wrap:wrap;gap:8px}.notification-day-list label{display:flex;align-items:center;gap:5px;border:1px solid var(--line);padding:7px 10px;border-radius:9px;background:#fff;font-size:12px;font-weight:700}.notification-info{margin-bottom:16px}.notification-info .muted{margin-top:5px}@media(max-width:700px){.notification-config-head{flex-direction:column}.notification-config-fields{grid-template-columns:1fr}}
 

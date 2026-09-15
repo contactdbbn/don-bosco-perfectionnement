@@ -425,19 +425,31 @@ async function dispatch() {
   }
 
   // 2) Nouvelles demandes : notification aux encadrants/admins.
-  const since = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-  const { data: newMoves } = await admin.from('slot_change_requests').select('id, member_id, week_start, requested_slot').eq('status','pending').gte('created_at', since)
-  const { data: newStatuses } = await admin.from('status_change_requests').select('id, member_id, week_start, requested_status').eq('status','pending').gte('created_at', since)
-  const { data: staff } = await admin.from('profiles').select('id').in('role',['admin','coach']).eq('active',true)
+  // IMPORTANT : on ne limite plus la recherche aux 10 dernières minutes.
+  // Une demande créée avant l'ouverture de la plage horaire doit pouvoir être
+  // notifiée au premier passage du Cron dans cette plage. La table
+  // push_notification_log + deliverOnce() assure l'anti-doublon.
+  const { data: newMoves, error: newMovesError } = await admin
+    .from('slot_change_requests')
+    .select('id, member_id, week_start, requested_slot, created_at')
+    .eq('status','pending')
+  if (newMovesError) throw newMovesError
+
+  const { data: newStatuses, error: newStatusesError } = await admin
+    .from('status_change_requests')
+    .select('id, member_id, week_start, requested_status, created_at')
+    .eq('status','pending')
+  if (newStatusesError) throw newStatusesError
+
+  const { data: staff, error: staffError } = await admin
+    .from('profiles')
+    .select('id,role')
+    .in('role',['admin','coach'])
+    .eq('active',true)
+  if (staffError) throw staffError
+
+  console.log(`[push][new_slot_request] fenêtre=${withinWindow(now, settings.new_slot_request) ? 'ACTIVE' : 'INACTIVE'} demandes_en_attente=${newMoves?.length || 0} destinataires=${staff?.length || 0}`)
   if (withinWindow(now, settings.new_slot_request)) for (const req of newMoves || []) {
-    const title = 'Nouvelle demande de créneau'
-    const body = `Une demande de changement de créneau concerne la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
-    for (const s of staff || []) {
-      const delivered = await deliverOnce(s.id, 'new_slot_request', String(req.id), title, body, { type:'slot_request', requestId:req.id })
-      if (delivered > 0) sent += delivered
-    }
-  }
-  if (withinWindow(now, settings.new_status_request)) for (const req of newStatuses || []) {
     const title = 'Nouvelle demande de présence'
     const body = `Une demande de modification de présence est en attente pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
     for (const s of staff || []) {
