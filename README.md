@@ -1,9 +1,17 @@
-# Don Bosco - Perfectionnement — V129
+# Don Bosco - Perfectionnement — V135
 
-## Modification V129
-- Mon suivi : les boutons de demande de changement de créneau sont désormais présentés dans un encadré dédié et nettement plus visibles.
-- Boutons Créneau 1 / Créneau 2 / Créneau 3 avec bordure renforcée, taille tactile adaptée et libellé explicite.
-- Correction de l'affichage du nom du créneau dans le bouton de demande.
-- Cache-busting / Service Worker V129.
+Corrections et évolutions :
+- Messages adhérent ↔ administrateur : saisie depuis Profil, Nouveau message côté administrateur, discussions, afficher/masquer.
+- Notifications séparées en 3 sous-pages : Adhérents ; Encadrants et administrateurs ; Manuelles et bandeau.
+- Restauration des notifications liées aux actions dans la sous-page Encadrants et administrateurs.
+- Envoi manuel avec secours vers `push-notifications` si `custom-notifications` est indisponible.
+- Export PDF Encadrant rendu non bloquant par popup : impression directe depuis une vue d'export.
+- SQL `supabase/v131-messages.sql` pour les champs d'expéditeur.
 
-Version basée sur V128.
+
+## V135
+- Commentaires sur chaque message, utilisables par l’adhérent et l’administrateur.
+- La page Messages adhérent est masquée lorsqu’aucun message visible ne reste.
+- Onglet Notifications renommé « Bandeau - Push ».
+- Correction Push : normalisation de la clé privée VAPID côté Edge Function (base64url/base64, hex 64 caractères ou PKCS#8 PEM/base64) et diagnostic explicite si la clé reste invalide.
+- SQL : supabase/v134-messages-comments.sql à exécuter avant le déploiement.

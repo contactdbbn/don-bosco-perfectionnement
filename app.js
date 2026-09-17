@@ -54,6 +54,13 @@ if(!db.statusRequests) db.statusRequests=[];
 if(!Array.isArray(db.objectiveComments)) db.objectiveComments=[];
 if(!Array.isArray(db.objectiveReactions)) db.objectiveReactions=[];
 if(!db.coachNotesByDate || typeof db.coachNotesByDate!=='object') db.coachNotesByDate={};
+if(!Array.isArray(db.adminMessages)) db.adminMessages=[];
+if(!Array.isArray(db.adminMessageComments)) db.adminMessageComments=[];
+if(!Array.isArray(db.adminMessageComments)) db.adminMessageComments=[];
+if(!db.notificationPrograms || typeof db.notificationPrograms!=='object') db.notificationPrograms={};
+if(!db.manualNotification || typeof db.manualNotification!=='object') db.manualNotification={content:'',recipients:{member:true,coach:true,admin:true}};
+if(!db.informationBanner || typeof db.informationBanner!=='object') db.informationBanner={active:false,content:''};
+if(!db.adminRequestVisibility || typeof db.adminRequestVisibility!=='object') db.adminRequestVisibility={cancelled:false,rejected:false};
 // Migration : compteur de changements effectué par adhérent.
 db.members.forEach(m=>{ if(typeof m.changeCount!=="number") m.changeCount=0; if(!m.password) m.password="1234"; if(!m.role) m.role="member"; });
 let weekOffset=0;
@@ -102,6 +109,8 @@ let staffLoggedIn=localStorage.getItem("sportclub-staff-auth") === "1";
 let adminRequestFilter=localStorage.getItem("sportclub-admin-request-filter") || "pending";
 let tdbPeriodFilter=localStorage.getItem("sportclub-tdb-period-filter") || "all";
 let notificationSettings = readStorageJson("sportclub-notification-settings", null) || {};
+const DEFAULT_STAFF_NOTIFICATION_WINDOW={active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"};
+if(!notificationSettings.staff_delivery_window) notificationSettings.staff_delivery_window={...DEFAULT_STAFF_NOTIFICATION_WINDOW};
 const DEFAULT_NOTIFICATION_SETTINGS={
   attendance_reminder:{active:true,days:[0],start:"18:00",end:"18:05"},
   new_slot_request:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"},
@@ -111,6 +120,9 @@ const DEFAULT_NOTIFICATION_SETTINGS={
   attendance_confirmed:{active:true,days:[1,2,3,4,5,6,0],start:"07:00",end:"23:00"}
 };
 Object.keys(DEFAULT_NOTIFICATION_SETTINGS).forEach(k=>{if(!notificationSettings[k]) notificationSettings[k]={...DEFAULT_NOTIFICATION_SETTINGS[k]};});
+const DEFAULT_NOTIFICATION_PROGRAMS=[1,2,3].map(i=>({id:i,active:false,title:`Notification programmée ${i}`,content:'',mode:'days',days:[],weekTypes:[],recipients:{member:true,coach:false,admin:false},time:'12:00'}));
+for(const n of DEFAULT_NOTIFICATION_PROGRAMS){ if(!db.notificationPrograms[n.id]) db.notificationPrograms[n.id]=n; else db.notificationPrograms[n.id]={...n,...db.notificationPrograms[n.id],recipients:{...n.recipients,...(db.notificationPrograms[n.id].recipients||{})}}; }
+
 let appUsers=readStorageJson("sportclub-users-v1",null)||{
   admin:{username:"admin",password:"admin1234",role:"admin"},
   encadrant:{username:"encadrant",password:"1234",role:"coach"}
@@ -271,6 +283,8 @@ const setStatus=(id,status)=>setStatusForWeek(id,status,weekKey());
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 
 function render(){
+ const banner=document.getElementById('informationBanner');
+ if(banner){ const b=db.informationBanner||{}; banner.innerHTML=b.active&&String(b.content||'').trim()?`<div class="information-banner-inner"><strong>Information</strong><span>${esc(b.content).replace(/\n/g,'<br>')}</span></div>`:''; banner.classList.toggle('hidden',!(b.active&&String(b.content||'').trim())); }
  const memberTab=document.querySelector('.tab[data-view="members"]');
  const moveTab=document.querySelector('.tab[data-view="moves"]');
  memberTab.style.display=canCoach()?"":"none";
@@ -278,8 +292,9 @@ function render(){
  if(!canCoach() && !document.getElementById("membersView").classList.contains("hidden")){
    document.querySelector('.tab[data-view="dashboard"]').click();
  }
+ const visibleMemberMessages=(db.adminMessages||[]).filter(x=>Number(x.memberId)===Number(currentMemberId)&&x.visible!==false); const mb=document.getElementById("messageBadge"); if(mb) mb.textContent=canAdmin()?String((db.adminMessages||[]).filter(x=>x.visible!==false).length||""):String(visibleMemberMessages.length||"");
  document.getElementById("moveBadge").textContent=(db.moves.filter(m=>m.status==="pending").length+(db.statusRequests||[]).filter(m=>m.status==="pending").length)||"";
- renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); renderNotifications(); syncTabs();
+ renderDashboard(); renderMembers(); renderTdb(); renderCalendar(); renderMoves(); renderMemberHistory(); renderRequestHistory(); renderObjectives(); renderEvents(); renderNotifications(); renderMessages(); renderCoachExportData(); syncTabs();
 }
 function hideMemberLogin(){ const box=document.getElementById("memberLogin"); if(box) box.classList.add("hidden"); }
 let v87LoginDirectory=[];
@@ -387,7 +402,7 @@ function openProfileMenu(){
  let menu=document.getElementById("profileMenu");
  if(!menu){ menu=document.createElement("div"); menu.id="profileMenu"; document.body.appendChild(menu); }
  const profile=getCurrentProfile();
- menu.innerHTML=`<div class="profile-menu-card"><div class="profile-menu-head"><div><div class="eyebrow">MON PROFIL</div><h3>${esc(profile?.name||"")}</h3><div class="muted">${esc(ROLE_LABELS[profile?.role]||"")}</div></div><button class="profile-close" onclick="closeProfileMenu()">×</button></div><div class="profile-menu-actions"><button class="secondary" onclick="openPasswordModal()">Modifier le mot de passe</button><button class="danger" onclick="logoutMember()">Déconnexion</button></div></div>`;
+ menu.innerHTML=`<div class="profile-menu-card"><div class="profile-menu-head"><div><div class="eyebrow">MON PROFIL</div><h3>${esc(profile?.name||"")}</h3><div class="muted">${esc(ROLE_LABELS[profile?.role]||"")}</div></div><button class="profile-close" onclick="closeProfileMenu()">×</button></div><div class="profile-menu-actions">${currentRole==="member"?`<button class="secondary" onclick="openAdminMessageModal()">Message pour l’administrateur</button>`:""}${currentRole==="coach"?`<button class="secondary" onclick="openCoachExportModal()">Exporter en PDF</button>`:""}<button class="secondary" onclick="openPasswordModal()">Modifier le mot de passe</button><button class="danger" onclick="logoutMember()">Déconnexion</button></div></div>`;
  menu.classList.add("open");
 }
 function closeProfileMenu(){ const menu=document.getElementById("profileMenu"); if(menu) menu.classList.remove("open"); }
@@ -678,6 +693,11 @@ function setObjectiveReaction(date,reaction){
  if(!['up','down'].includes(reaction)) return;
  if(!Array.isArray(db.objectiveReactions)) db.objectiveReactions=[];
 if(!db.coachNotesByDate || typeof db.coachNotesByDate!=='object') db.coachNotesByDate={};
+if(!Array.isArray(db.adminMessages)) db.adminMessages=[];
+if(!db.notificationPrograms || typeof db.notificationPrograms!=='object') db.notificationPrograms={};
+if(!db.manualNotification || typeof db.manualNotification!=='object') db.manualNotification={content:'',recipients:{member:true,coach:true,admin:true}};
+if(!db.informationBanner || typeof db.informationBanner!=='object') db.informationBanner={active:false,content:''};
+if(!db.adminRequestVisibility || typeof db.adminRequestVisibility!=='object') db.adminRequestVisibility={cancelled:false,rejected:false};
  db.objectiveReactions=db.objectiveReactions.filter(r=>!(r.date===date&&Number(r.memberId)===Number(me.id)));
  db.objectiveReactions.push({date,memberId:me.id,reaction,createdAt:Date.now()});
  save(); renderObjectives();
@@ -1247,6 +1267,12 @@ function renderTdbCounters(history){
  const grand=filtered.reduce((sum,h)=>sum+SLOT_NAMES.reduce((a,_,i)=>a+Number(h[i+1]||0),0),0);
  return `<section class="stats tdb-stats"><div class="stat"><div class="num">${grand}</div><div class="label">Total des présences réelles</div><div class="muted">Sur ${filtered.length} semaine${filtered.length>1?'s':''} enregistrée${filtered.length>1?'s':''}</div></div>${totals}</section>`;
 }
+function renderPastAttendanceComparisonTable(){
+ const today=isoDate(new Date());
+ const dates=getCourseDates().filter(d=>d<today).sort().reverse();
+ const rows=dates.map(date=>{const key=mondayKey(new Date(date+'T12:00:00'));return `<tr><td>${fmt(date)}</td>${[1,2,3].map(slot=>`<td>${Number(db.actualAttendance?.[key+'_'+slot]??0)}</td>`).join('')}${[1,2,3].map(slot=>`<td>${getControlPresence(slot,key)}</td>`).join('')}</tr>`}).join('');
+ return `<div class="card past-attendance-table-card"><div><p class="eyebrow">COMPARAISON</p><h2>Présences réelles et déclarées</h2><div class="muted">Dates de cours passées · Réel = présence constatée · Déclaré = adhérents ayant répondu Présent.</div></div><div class="table-scroll"><table class="attendance-compare-table"><thead><tr><th rowspan="2">Date</th><th colspan="3">Réelles</th><th colspan="3">Déclarées</th></tr><tr><th>C1</th><th>C2</th><th>C3</th><th>C1</th><th>C2</th><th>C3</th></tr></thead><tbody>${rows||'<tr><td colspan="7">Aucune date de cours passée.</td></tr>'}</tbody></table></div></div>`;
+}
 function renderTdb(){
  if(!canCoach()){ document.getElementById("tdbView").innerHTML=""; return; }
  const history=getActualAttendanceHistory();
@@ -1254,7 +1280,7 @@ function renderTdb(){
  const options=[['all','Toute la période'],['3','3 derniers mois'],['6','6 derniers mois'],['12','12 derniers mois']];
  const period=getCalendarPeriod();
  const toolbar=`<section class="slot-filter tdb-period-filter"><div class="filter-title">Filtrer la période du graphique et des compteurs</div><div class="filter-actions">${options.map(([v,l])=>`<button class="filter-btn ${tdbPeriodFilter===v?'active':''}" onclick="setTdbPeriodFilter('${v}')">${l}</button>`).join('')}</div><div class="filter-help">Période du calendrier : ${fmt(period.start)} au ${fmt(period.end)}.</div></section>`;
- const graphCard=`<div class="card"><div class="row"><div><p class="eyebrow">ÉVOLUTION</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${renderAttendanceEvolution(filteredHistory)}${toolbar}${renderTdbCounters(history)}</div>`;
+ const graphCard=`<div class="card"><div class="row"><div><p class="eyebrow">ÉVOLUTION</p><h2>Évolution des présences réelles</h2><div class="muted">Suivi des présences réellement constatées pour les 3 créneaux. La ligne à 20 correspond au seuil de référence.</div></div></div>${renderAttendanceEvolution(filteredHistory)}${toolbar}${renderTdbCounters(history)}${renderPastAttendanceComparisonTable()}</div>`;
  document.getElementById("tdbView").innerHTML=`${renderActualAttendanceCard()}${graphCard}`;
  document.getElementById("tdbWeekLabel").textContent=fmt(weekKey());
  document.getElementById("tdbPrevWeek").onclick=()=>{weekOffset--;render()};
@@ -1283,16 +1309,36 @@ function renderMembers(){
  document.getElementById("membersView").innerHTML=quotaHtml+stats+listHtml+(canAdmin()?renderAdminTools():"");
 }
 
+async function forceUserNotifications(memberId){
+ if(!canAdmin()) return;
+ const member=db.members.find(x=>Number(x.id)===Number(memberId));
+ const profileId=String(member?.profileId||'');
+ if(!profileId) return toast("Aucun compte Auth associé à cet utilisateur.");
+ const sb=v53Client();
+ if(!sb) return toast("Connexion Supabase indisponible.");
+ if(!confirm(`Forcer l’activation des notifications pour ${member.name} ?\n\nCette action réactive les abonnements Push déjà enregistrés pour ce compte.`)) return;
+ try{
+   const {data,error}=await sb.from('push_subscriptions').update({active:true,disabled_by_user:false,updated_at:new Date().toISOString()}).eq('profile_id',profileId).select('id');
+   if(error) throw error;
+   const count=Array.isArray(data)?data.length:0;
+   if(!count){ toast("Aucun abonnement Push enregistré pour cet utilisateur. L’activation doit être faite depuis son appareil."); return; }
+   await v53LoadRemote();
+   renderMembers();
+   toast(`${count} abonnement${count>1?'s':''} Push réactivé${count>1?'s':''}.`);
+ }catch(e){ console.error('[V138] activation Push administrateur impossible',e); toast(`Activation impossible : ${e?.message||'erreur inconnue'}`); }
+}
+
 function memberDirectoryCard(m){
  const role=getMemberRole(m), roleLabel=ROLE_LABELS[role]||role;
  const account=v63AccountStatus[Number(m.id)]||{};
  const login=account.last_sign_in_at?fmtDateTime(account.last_sign_in_at):"Jamais";
  const passwordState=account.password_changed_at?`Mot de passe modifié le ${esc(fmtDateTime(account.password_changed_at))}`:(account.must_change_password?`Mot de passe temporaire à changer`:(account.user_id?`État du mot de passe non renseigné`:""));
  const credentialEmailState=account.credentials_email_sent_at?`Dernier envoi des identifiants : ${esc(fmtDateTime(account.credentials_email_sent_at))}`:`Aucun envoi des identifiants`;
+ const notificationState=m.notificationStatus==='active'?{label:'Actif',className:'active'}:m.notificationStatus==='user_disabled'||m.notificationStatus==='inactive'?{label:'Inactif',className:'inactive'}:{label:'Jamais activé',className:'none'};
 
  const slotText=role==="admin"?(m.slot?slotLabel(m.slot):"Aucun"):(role==="member"?slotLabel(m.slot):"Aucun");
  const accountActions=canManageRoles()?`${m.authEmail?`<button onclick="manageMemberAccount(${m.id})">Gérer le compte</button><button class="primary" onclick="sendAccountCredentialsEmail(${m.id})">✉ Envoyer les identifiants</button>`:`<button class="primary" onclick="createMemberAccount(${m.id})">Créer le compte</button>`}<button onclick="changeMemberPassword(${m.id})">Réinitialiser le mot de passe</button><button class="danger" onclick="removeMember(${m.id})">Désactiver</button>`:"";
- return `<article class="card member-directory-card-item"><div class="member-directory-main"><div class="member-directory-identity"><strong>${esc(m.name)}</strong><span class="member-role-pill">${esc(roleLabel)}</span></div><div class="member-directory-info"><div><span class="field-label">Rôle</span><strong>${esc(roleLabel)}</strong></div><div><span class="field-label">Créneau habituel</span><strong>${esc(slotText)}</strong></div><div><span class="field-label">Compte adhérent</span><strong>${m.authEmail?"Compte créé":"Compte non créé"}</strong>${m.authEmail?`<span class="muted">${esc(m.authEmail)}</span>`:""}</div><div><span class="field-label">Dernière connexion</span><strong>${esc(login)}</strong>${passwordState?`<span class="muted">${esc(passwordState)}</span>`:""}</div><div><span class="field-label">Email des identifiants</span><strong>${esc(credentialEmailState)}</strong></div></div></div><div class="member-directory-actions">${accountActions}</div>${canManageRoles()?`<div class="member-directory-settings"><span class="field-label">Modifier le rôle</span><select onchange="setMemberRole(${m.id},this.value)"><option value="member" ${role==='member'?"selected":""}>Adhérent</option><option value="coach" ${role==='coach'?"selected":""}>Encadrant</option><option value="admin" ${role==='admin'?"selected":""}>Administrateur</option></select><span class="field-label">Créneau habituel</span>${role==='admin'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="" ${!m.slot?"selected":""}>Aucun</option><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:role==='member'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:`<span class="muted">Sans créneau</span>`}</div>`:""}</article>`;
+ return `<article class="card member-directory-card-item"><div class="member-directory-main"><div class="member-directory-identity"><strong>${esc(m.name)}</strong><span class="member-role-pill">${esc(roleLabel)}</span></div><div class="member-directory-info"><div><span class="field-label">Rôle</span><strong>${esc(roleLabel)}</strong></div><div><span class="field-label">Créneau habituel</span><strong>${esc(slotText)}</strong></div><div><span class="field-label">Compte adhérent</span><strong>${m.authEmail?"Compte créé":"Compte non créé"}</strong>${m.authEmail?`<span class="muted">${esc(m.authEmail)}</span>`:""}</div><div><span class="field-label">Dernière connexion</span><strong>${esc(login)}</strong>${passwordState?`<span class="muted">${esc(passwordState)}</span>`:""}</div><div><span class="field-label">Email des identifiants</span><strong>${esc(credentialEmailState)}</strong></div><div><span class="field-label">Notifications</span><div class="notification-user-status"><span class="notification-status-btn ${notificationState.className}">${notificationState.label}</span></div></div></div></div><div class="member-directory-actions">${accountActions}</div>${canManageRoles()?`<div class="member-directory-settings"><span class="field-label">Modifier le rôle</span><select onchange="setMemberRole(${m.id},this.value)"><option value="member" ${role==='member'?"selected":""}>Adhérent</option><option value="coach" ${role==='coach'?"selected":""}>Encadrant</option><option value="admin" ${role==='admin'?"selected":""}>Administrateur</option></select><span class="field-label">Créneau habituel</span>${role==='admin'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="" ${!m.slot?"selected":""}>Aucun</option><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:role==='member'?`<select onchange="setMemberHabitualSlot(${m.id},this.value)"><option value="1" ${Number(m.slot)===1?"selected":""}>Créneau 1</option><option value="2" ${Number(m.slot)===2?"selected":""}>Créneau 2</option><option value="3" ${Number(m.slot)===3?"selected":""}>Créneau 3</option></select>`:`<span class="muted">Sans créneau</span>`}</div>`:""}</article>`;
 }
 
 function notificationDayName(d){return ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"][Number(d)]||d;}
@@ -1309,7 +1355,7 @@ function notificationSetting(key){return notificationSettings[key]||DEFAULT_NOTI
 async function loadNotificationSettings(){
  if(!canAdmin()) return;
  const sb=v53Client(); if(!sb||!v53User()) return;
- try{const {data,error}=await sb.from("notification_settings").select("notification_type,active,days,start_time,end_time"); if(error) throw error; (data||[]).forEach(r=>{notificationSettings[r.notification_type]={active:r.active!==false,days:Array.isArray(r.days)?r.days.map(Number):[],start:String(r.start_time||"07:00").slice(0,5),end:String(r.end_time||"23:00").slice(0,5)};}); saveNotificationSettings();}catch(e){console.warn("[V99] paramètres notifications non chargés",e);}
+ try{const {data,error}=await sb.from("notification_settings").select("notification_type,active,days,start_time,end_time"); if(error) throw error; (data||[]).forEach(r=>{notificationSettings[r.notification_type]={active:r.active!==false,days:Array.isArray(r.days)?r.days.map(Number):[],start:String(r.start_time||"07:00").slice(0,5),end:String(r.end_time||"23:00").slice(0,5)};}); if(!notificationSettings.staff_delivery_window) notificationSettings.staff_delivery_window={...DEFAULT_STAFF_NOTIFICATION_WINDOW}; saveNotificationSettings();}catch(e){console.warn("[V99] paramètres notifications non chargés",e);}
 }
 function updateNotificationSetting(key,field,value){
  if(!canAdmin()) return toast("Réservé à l’administrateur.");
@@ -1339,13 +1385,119 @@ async function triggerNotificationAction(action){
 }
 window.triggerNotificationAction=triggerNotificationAction;
 
-function renderNotifications(){
- const el=document.getElementById("notificationsView"); if(!el)return;
- if(!canAdmin()){el.innerHTML="";return;}
- const cards=NOTIFICATION_DEFS.map(n=>{const s=notificationSetting(n.key); const manual=n.key==="attendance_reminder"||n.key==="attendance_confirmed"; const manualBtn=n.key==="attendance_reminder"?`<button class="primary notification-send-btn" onclick="triggerNotificationAction('manual_attendance_reminder')">↗ Envoyer maintenant · À confirmer</button>`:n.key==="attendance_confirmed"?`<button class="primary notification-send-btn" onclick="triggerNotificationAction('manual_attendance_confirmed')">↗ Envoyer maintenant · Présents</button>`:""; return `<div class="card notification-config-card"><div class="notification-config-head"><div><p class="eyebrow">NOTIFICATION</p><h3>${esc(n.title)}</h3><div class="muted">${esc(n.desc)}</div></div><label class="notification-toggle"><input type="checkbox" ${s.active?"checked":""} onchange="updateNotificationSetting('${n.key}','active',this.checked)"><span>${s.active?"Activée":"Désactivée"}</span></label></div><div class="notification-config-fields"><label>Heure de début<input type="time" value="${esc(s.start)}" onchange="updateNotificationSetting('${n.key}','start',this.value)"></label><label>Heure de fin<input type="time" value="${esc(s.end)}" onchange="updateNotificationSetting('${n.key}','end',this.value)"></label></div><div class="notification-days"><span class="field-label">Jours d’envoi</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" ${s.days.includes(d)?"checked":""} onchange="updateNotificationDays('${n.key}')" data-notif-day="${n.key}" value="${d}">${notificationDayName(d).slice(0,3)}</label>`).join("")}</div></div>${manual?`<div class="notification-manual"><div class="muted">${n.key==="attendance_reminder"?"Cible : adhérents à confirmer pour la semaine suivante.":"Cible : adhérents ayant le statut Présent pour la semaine affichée, avec le créneau validé le cas échéant."}</div>${manualBtn}</div>`:""}</div>`}).join("");
- el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Notifications</h1><p>Activez ou désactivez les notifications Push et définissez les jours et horaires d’envoi.</p></div></section><div class="notification-info card"><strong>Fonctionnement</strong><div class="muted">Les notifications sont envoyées automatiquement par Supabase. Les deux notifications de présence peuvent aussi être déclenchées manuellement. Le rappel cible les « À confirmer » de la semaine suivante ; « Présence confirmée » cible les Présents de la semaine affichée.</div></div>${cards}`;
+function programSetting(id){ return db.notificationPrograms[id] || DEFAULT_NOTIFICATION_PROGRAMS[id-1]; }
+function saveProgram(id,patch){ if(!canAdmin())return; db.notificationPrograms[id]={...programSetting(id),...patch}; save(); renderNotifications(); }
+function updateProgram(id,field,value){ const p={...programSetting(id)}; if(field==='recipients') p.recipients={...p.recipients,...value}; else p[field]=value; saveProgram(id,p); }
+function updateProgramDays(id){ const days=[...document.querySelectorAll(`input[data-program-day="${id}"]:checked`)].map(x=>Number(x.value)); updateProgram(id,'days',days); }
+function updateProgramWeekTypes(id){ const types=[...document.querySelectorAll(`input[data-program-week="${id}"]:checked`)].map(x=>x.value); updateProgram(id,'weekTypes',types); }
+function updateBanner(field,value){ if(!canAdmin())return; db.informationBanner[field]=field==='active'?!!value:String(value||''); save(); render(); }
+function updateManualNotification(field,value){ if(!canAdmin())return; if(field==='recipients') db.manualNotification.recipients={...db.manualNotification.recipients,...value}; else db.manualNotification[field]=String(value||''); save(); renderNotifications(); }
+async function sendCustomManualNotification(){
+ if(!canAdmin()) return toast('Réservé à l’administrateur.');
+ const content=String(db.manualNotification?.content||'').trim(); if(!content)return toast('Saisissez le contenu de la notification.');
+ const recipients=db.manualNotification.recipients||{}; const targets=Object.entries(recipients).filter(([,v])=>v).map(([k])=>k); if(!targets.length)return toast('Sélectionnez au moins un destinataire.');
+ const sb=v53Client(); if(!sb)return toast('Connexion Supabase requise.');
+ try{ let result=await sb.functions.invoke('custom-notifications',{body:{action:'manual',title:'Don Bosco - Perfectionnement',body:content,recipients:targets,event_key:`manual-${Date.now()}`}}); if(result.error){ console.warn('[V131] custom-notifications indisponible, tentative push-notifications',result.error); result=await sb.functions.invoke('push-notifications',{body:{action:'custom_manual',title:'Don Bosco - Perfectionnement',body:content,recipients:targets,event_key:`manual-${Date.now()}`}}); } if(result.error)throw result.error; toast(`${Number(result.data?.sent||0)} notification${Number(result.data?.sent||0)>1?'s':''} envoyée${Number(result.data?.sent||0)>1?'s':''}.`); }catch(e){ console.error('[V131] notification manuelle',e); toast(`Échec de l’envoi : ${e?.message||'erreur inconnue'}`); }
 }
+async function saveBannerRemote(){
+ const sb=v53Client(); if(!sb||!v53User()||!canAdmin())return;
+ try{await sb.from('information_banner').upsert({id:true,active:!!db.informationBanner.active,content:String(db.informationBanner.content||''),updated_by:v53User().id},{onConflict:'id'});}catch(e){console.warn('[banner]',e);}
+}
+const notificationRecipientHtml=(id,prefix='program')=>`<div class="notification-recipients"><span class="field-label">Destinataires</span><label><input type="checkbox" ${programSetting(id).recipients.member?'checked':''} onchange="updateProgram(${id},'recipients',{member:this.checked})"> Adhérents</label><label><input type="checkbox" ${programSetting(id).recipients.coach?'checked':''} onchange="updateProgram(${id},'recipients',{coach:this.checked})"> Encadrants</label><label><input type="checkbox" ${programSetting(id).recipients.admin?'checked':''} onchange="updateProgram(${id},'recipients',{admin:this.checked})"> Administrateurs</label></div>`;
+let notificationSubpage='members';
+function notificationActionSettingsHtml(){
+ const defs=NOTIFICATION_DEFS.filter(x=>x.key!=='attendance_confirmed');
+ return `<div class="card notification-actions-card"><p class="eyebrow">NOTIFICATIONS LIÉES AUX ACTIONS</p><h2>Notifications automatiques</h2><div class="muted">Ces notifications correspondent aux actions de l’application. Elles restent configurables indépendamment des 3 notifications personnalisées.</div>${defs.map(d=>{const st=notificationSetting(d.key);return `<div class="notification-action-row"><div><strong>${esc(d.title)}</strong><div class="muted">${esc(d.desc)}</div></div><label class="notification-toggle"><input type="checkbox" ${st.active?'checked':''} onchange="updateNotificationSetting('${d.key}','active',this.checked)"><span>${st.active?'Activée':'Désactivée'}</span></label><label>Début<input type="time" value="${esc(st.start)}" onchange="updateNotificationSetting('${d.key}','start',this.value)"></label><label>Fin<input type="time" value="${esc(st.end)}" onchange="updateNotificationSetting('${d.key}','end',this.value)"></label><div class="notification-day-list mini-days">${[1,2,3,4,5,6,0].map(day=>`<label><input type="checkbox" ${st.days.includes(day)?'checked':''} onchange="updateNotificationSetting('${d.key}','days',[...document.querySelectorAll('input[data-action-day=\\'${d.key}\\']:checked')].map(x=>Number(x.value)))" data-action-day="${d.key}" value="${day}">${notificationDayName(day).slice(0,3)}</label>`).join('')}</div></div>`}).join('')}<div class="card notification-action-row"><div><strong>Présence confirmée</strong><div class="muted">Envoi manuel depuis cette page.</div></div><button class="secondary" onclick="triggerNotificationAction('manual_attendance_reminder')">Rappel de présence</button><button class="secondary" onclick="triggerNotificationAction('manual_attendance_confirmed')">Présence confirmée</button></div></div>`;
+}
+function renderScheduledPrograms(filter){
+ return [1,2,3].map(id=>{const p=programSetting(id);const targets=Object.entries(p.recipients||{}).filter(([,v])=>v).map(([k])=>k);const show=filter==='member'?targets.includes('member'):targets.includes('coach')||targets.includes('admin');if(!show)return '';return `<div class="card notification-config-card custom-program"><div class="notification-config-head"><div><p class="eyebrow">NOTIFICATION PROGRAMMÉE ${id}</p><input class="notification-title-input" value="${esc(p.title||'')}" onchange="updateProgram(${id},'title',this.value)" placeholder="Titre de la notification"><div class="muted">Cette notification est visible ici car elle cible ${filter==='member'?'les adhérents':'les encadrants et/ou administrateurs'}.</div></div><label class="notification-toggle"><input type="checkbox" ${p.active?'checked':''} onchange="updateProgram(${id},'active',this.checked)"><span>${p.active?'Activée':'Désactivée'}</span></label></div><label>Contenu<textarea rows="4" onchange="updateProgram(${id},'content',this.value)" placeholder="Contenu de la notification...">${esc(p.content||'')}</textarea></label><div class="notification-config-fields"><label>Heure<input type="time" value="${esc(p.time||'12:00')}" onchange="updateProgram(${id},'time',this.value)"></label><label>Condition d’envoi<select onchange="updateProgram(${id},'mode',this.value)"><option value="days" ${p.mode==='days'?'selected':''}>Jours précis</option><option value="week_types" ${p.mode==='week_types'?'selected':''}>Type de semaine</option></select></label></div>${p.mode==='days'?`<div class="notification-days"><span class="field-label">Jours d’envoi</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" data-program-day="${id}" value="${d}" ${p.days.includes(d)?'checked':''} onchange="updateProgramDays(${id})">${notificationDayName(d).slice(0,3)}</label>`).join('')}</div></div>`:`<div class="notification-days"><span class="field-label">Types de semaine</span><div class="notification-day-list notification-week-list">${[['course','Cours'],['off','Libre'],['holiday','Vacances'],['public-holiday','Férié']].map(([v,l])=>`<label><input type="checkbox" data-program-week="${id}" value="${v}" ${p.weekTypes.includes(v)?'checked':''} onchange="updateProgramWeekTypes(${id})">${l}</label>`).join('')}</div></div>`}${notificationRecipientHtml(id)}</div>`;}).join('')||`<div class="empty">Aucune des 3 notifications programmées ne cible cette catégorie. Utilisez les destinataires des notifications pour l’ajouter.</div>`;
+}
+function staffNotificationWindowHtml(){
+ const w=notificationSetting("staff_delivery_window")||DEFAULT_STAFF_NOTIFICATION_WINDOW;
+ return `<div class="card notification-config-card staff-window-card"><p class="eyebrow">PÉRIODE GLOBALE D’ENVOI</p><h2>Périodes pendant lesquelles les notifications peuvent être envoyées</h2><div class="muted">Cette période s’applique aux notifications destinées aux encadrants et administrateurs. Elle constitue la plage autorisée globale, en complément de l’activation de chaque notification.</div><label class="notification-toggle"><input type="checkbox" ${w.active?'checked':''} onchange="updateNotificationSetting('staff_delivery_window','active',this.checked)"><span>${w.active?'Activée':'Désactivée'}</span></label><div class="notification-config-fields"><label>Heure de début<input type="time" value="${esc(w.start||'07:00')}" onchange="updateNotificationSetting('staff_delivery_window','start',this.value)"></label><label>Heure de fin<input type="time" value="${esc(w.end||'23:00')}" onchange="updateNotificationSetting('staff_delivery_window','end',this.value)"></label></div><div class="notification-days"><span class="field-label">Jours autorisés</span><div class="notification-day-list">${[1,2,3,4,5,6,0].map(d=>`<label><input type="checkbox" data-staff-window-day="${d}" value="${d}" ${w.days.includes(d)?'checked':''} onchange="updateStaffNotificationWindowDays()">${notificationDayName(d)}</label>`).join('')}</div></div></div>`;
+}
+function updateStaffNotificationWindowDays(){
+ const days=[...document.querySelectorAll('input[data-staff-window-day]:checked')].map(x=>Number(x.value));
+ updateNotificationSetting('staff_delivery_window','days',days);
+}
+function renderNotifications(){
+ const el=document.getElementById('notificationsView');if(!el)return;if(!canAdmin()){el.innerHTML='';return;}
+ const tabs=`<div class="notification-subtabs"><button class="tab ${notificationSubpage==='members'?'active':''}" onclick="setNotificationSubpage('members')">Adhérents</button><button class="tab ${notificationSubpage==='staff'?'active':''}" onclick="setNotificationSubpage('staff')">Encadrants et administrateurs</button><button class="tab ${notificationSubpage==='manual'?'active':''}" onclick="setNotificationSubpage('manual')">Bandeau - Push</button></div>`;
+ let content='';
+ if(notificationSubpage==='members') content=`<section><h2>Notifications envoyées aux adhérents</h2><div class="muted">3 notifications programmées maximum, selon les destinataires sélectionnés.</div>${renderScheduledPrograms('member')}</section>`;
+ else if(notificationSubpage==='staff') content=`<section><h2>Notifications envoyées aux encadrants et administrateurs</h2>${staffNotificationWindowHtml()}<div class="muted">3 notifications programmées maximum, selon les destinataires sélectionnés.</div>${renderScheduledPrograms('staff')}${notificationActionSettingsHtml()}</section>`;
+ else {const mr=db.manualNotification||{};const manual=`<div class="card notification-config-card"><p class="eyebrow">NOTIFICATION MANUELLE</p><h2>Envoi instantané</h2><label>Contenu<textarea rows="6" onchange="updateManualNotification('content',this.value)" placeholder="Contenu de la notification...">${esc(mr.content||'')}</textarea></label><div class="notification-recipients"><span class="field-label">Destinataires</span>${[['member','Adhérents'],['coach','Encadrants'],['admin','Administrateurs']].map(([k,l])=>`<label><input type="checkbox" ${mr.recipients?.[k]?'checked':''} onchange="updateManualNotification('recipients',{${k}:this.checked})"> ${l}</label>`).join('')}</div><button class="primary" onclick="sendCustomManualNotification()">↗ Envoyer maintenant</button></div>`;const b=db.informationBanner||{};const banner=`<div class="card notification-config-card"><p class="eyebrow">BANDEAU D’INFORMATION</p><h2>Bandeau visible sur toutes les pages</h2><label class="notification-toggle"><input type="checkbox" ${b.active?'checked':''} onchange="updateBanner('active',this.checked);saveBannerRemote()"><span>${b.active?'Activé':'Désactivé'}</span></label><label>Contenu<textarea rows="5" onchange="updateBanner('content',this.value);saveBannerRemote()" placeholder="Message affiché en haut de toutes les pages...">${esc(b.content||'')}</textarea></label></div>`;content=`<section><h2>Notifications manuelles</h2>${manual}${banner}</section>`;}
+ el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Notifications</h1><p>Les notifications sont réparties par destinataires et par mode d’envoi.</p></div></section>${tabs}${content}`;
+}
+function setNotificationSubpage(page){notificationSubpage=page;renderNotifications();}
+
 function updateNotificationDays(key){const vals=[...document.querySelectorAll(`input[data-notif-day="${key}"]:checked`)].map(x=>Number(x.value));updateNotificationSetting(key,"days",vals);}
+function coachExportData(){
+ const dates=getCourseDates().filter(d=>d<isoDate(new Date()));
+ return {tdb:document.getElementById('tdbView')?.innerText||'',objectives:document.getElementById('objectivesView')?.innerText||'',followup:document.getElementById('member-historyView')?.innerText||'',dates};
+}
+function renderCoachExportData(){ }
+function openCoachExportModal(){
+ if(currentRole!=='coach')return toast('Réservé à l’encadrement.'); closeProfileMenu();
+ let modal=document.getElementById('coachExportModal'); if(!modal){modal=document.createElement('div');modal.id='coachExportModal';document.body.appendChild(modal);}
+ modal.innerHTML=`<div class="password-modal-card export-modal-card"><div class="profile-menu-head"><div><div class="eyebrow">EXPORT PDF</div><h3>Exporter les pages Encadrant</h3></div><button class="profile-close" onclick="closeCoachExportModal()">×</button></div><p class="muted">Sélectionnez les contenus à inclure dans le PDF.</p><label class="checkbox-line"><input id="exportTdb" type="checkbox" checked> TDB (avec tableau des présences réelles et déclarées)</label><label class="checkbox-line"><input id="exportObjectives" type="checkbox" checked> Objectifs</label><label class="checkbox-line"><input id="exportFollowup" type="checkbox" checked> Mon suivi</label><div class="password-modal-actions"><button class="secondary" onclick="closeCoachExportModal()">Annuler</button><button class="primary" onclick="exportCoachPdf()">Exporter en PDF</button></div></div>`; modal.classList.add('open');
+}
+function closeCoachExportModal(){document.getElementById('coachExportModal')?.classList.remove('open');}
+function exportCoachPdf(){
+ const selected=[]; if(document.getElementById('exportTdb')?.checked)selected.push('tdb');if(document.getElementById('exportObjectives')?.checked)selected.push('objectives');if(document.getElementById('exportFollowup')?.checked)selected.push('followup');if(!selected.length)return toast('Sélectionnez au moins une page.');
+ const actual=getActualAttendanceHistory().filter(h=>h.week<isoDate(new Date())); const rows=actual.map(h=>{const declared=[1,2,3].map(slot=>getControlPresence(slot,h.week)).join(' / ');const real=[1,2,3].map(slot=>Number(h[slot]||0)).join(' / ');return `<tr><td>${fmt(h.week)}</td><td>${real}</td><td>${declared}</td></tr>`}).join('');
+ const sections=[]; if(selected.includes('tdb'))sections.push(`<section><h1>TDB</h1><div class="export-source">Tableau des présences réelles et déclarées pour les dates de cours passées.</div><table><thead><tr><th>Date</th><th>Réelles (C1 / C2 / C3)</th><th>Déclarées (C1 / C2 / C3)</th></tr></thead><tbody>${rows||'<tr><td colspan="3">Aucune donnée.</td></tr>'}</tbody></table></section>`); if(selected.includes('objectives'))sections.push(`<section><h1>Objectifs</h1>${document.getElementById('objectivesView')?.innerHTML||'<p>Aucune donnée.</p>'}</section>`); if(selected.includes('followup'))sections.push(`<section><h1>Mon suivi</h1>${document.getElementById('member-historyView')?.innerHTML||'<p>Aucune donnée.</p>'}</section>`);
+ const print=document.createElement('div'); print.id='coachPrintArea'; print.innerHTML=`<div class="print-header"><h1>Don Bosco - Perfectionnement</h1><p>Export Encadrant · ${new Date().toLocaleString('fr-FR')}</p></div>${sections.join('')}`; document.body.appendChild(print); closeCoachExportModal();
+ const previousTitle=document.title; document.title='Don Bosco - Perfectionnement — Export Encadrant';
+ const cleanup=()=>{print.remove();document.title=previousTitle;window.removeEventListener('afterprint',cleanup);};
+ window.addEventListener('afterprint',cleanup); setTimeout(()=>window.print(),100);
+}
+
+function openAdminMessageModal(){
+ if(currentRole!=='member')return; closeProfileMenu(); let modal=document.getElementById('adminMessageModal');if(!modal){modal=document.createElement('div');modal.id='adminMessageModal';document.body.appendChild(modal);} modal.innerHTML=`<div class="password-modal-card"><div class="profile-menu-head"><div><div class="eyebrow">MESSAGE</div><h3>Message pour l’administrateur</h3></div><button class="profile-close" onclick="closeAdminMessageModal()">×</button></div><p class="muted">Écrivez votre message à l’administrateur.</p><textarea id="adminMessageText" rows="8" placeholder="Écrivez votre message..."></textarea><div class="password-modal-actions"><button class="secondary" onclick="closeAdminMessageModal()">Annuler</button><button class="primary" onclick="sendAdminMessage()">Envoyer</button></div></div>`;modal.classList.add('open');
+}
+function closeAdminMessageModal(){document.getElementById('adminMessageModal')?.classList.remove('open');}
+async function sendAdminMessage(){const me=currentMember();const text=String(document.getElementById('adminMessageText')?.value||'').trim();if(!me||!text)return toast('Écrivez un message.');const now=Date.now();db.adminMessages.push({id:now,memberId:me.id,memberName:me.name,text,senderRole:'member',senderProfileId:v53User()?.id||null,visible:true,createdAt:now,updatedAt:now});save();try{if(v53Session())await v53SyncRemote();}catch(e){console.error(e);toast('Message enregistré localement mais non synchronisé.');}closeAdminMessageModal();render();toast('Message envoyé à l’administrateur.');}
+function openNewAdminMessageModal(){
+ if(!canAdmin())return; let modal=document.getElementById('newAdminMessageModal');if(!modal){modal=document.createElement('div');modal.id='newAdminMessageModal';document.body.appendChild(modal);}
+ const members=(db.members||[]).filter(m=>m.active!==false&&getMemberRole(m)==='member').sort((a,b)=>String(a.name).localeCompare(String(b.name),'fr-FR'));
+ modal.innerHTML=`<div class="password-modal-card"><div class="profile-menu-head"><div><div class="eyebrow">NOUVEAU MESSAGE</div><h3>Envoyer un message</h3></div><button class="profile-close" onclick="closeNewAdminMessageModal()">×</button></div><label>Utilisateur<select id="newAdminMessageMember">${members.map(m=>`<option value="${Number(m.id)}">${esc(m.name)}</option>`).join('')}</select></label><label>Message<textarea id="newAdminMessageText" rows="8" placeholder="Écrivez votre message..."></textarea></label><div class="password-modal-actions"><button class="secondary" onclick="closeNewAdminMessageModal()">Annuler</button><button class="primary" onclick="sendAdminToMember()">Envoyer</button></div></div>`;modal.classList.add('open');
+}
+function closeNewAdminMessageModal(){document.getElementById('newAdminMessageModal')?.classList.remove('open');}
+async function sendAdminToMember(){if(!canAdmin())return;const memberId=Number(document.getElementById('newAdminMessageMember')?.value);const text=String(document.getElementById('newAdminMessageText')?.value||'').trim();const me=(db.members||[]).find(m=>Number(m.id)===memberId);if(!me||!text)return toast('Sélectionnez un utilisateur et écrivez un message.');const now=Date.now();db.adminMessages.push({id:now,memberId:me.id,memberName:me.name,text,senderRole:'admin',senderProfileId:v53User()?.id||null,visible:true,createdAt:now,updatedAt:now});save();try{await v53SyncRemote();}catch(e){console.error(e);toast('Message enregistré localement mais non synchronisé.');}closeNewAdminMessageModal();render();toast('Message envoyé.');}
+function toggleAdminMessage(id){if(!canAdmin())return;const m=db.adminMessages.find(x=>Number(x.id)===Number(id));if(!m)return;m.visible=m.visible===false;m.updatedAt=Date.now();save();try{v53SyncRemote();}catch(e){}render();}
+function messageCommentsFor(messageId){return (db.adminMessageComments||[]).filter(x=>Number(x.messageId)===Number(messageId)).sort((a,b)=>Number(a.createdAt)-Number(b.createdAt));}
+async function addAdminMessageComment(messageId){
+ const message=(db.adminMessages||[]).find(x=>Number(x.id)===Number(messageId));
+ if(!message)return;
+ const allowed=currentRole==='member' ? Number(message.memberId)===Number(currentMemberId) && message.visible!==false : canAdmin();
+ if(!allowed)return toast('Vous ne pouvez pas commenter ce message.');
+ const input=document.getElementById(`messageComment_${messageId}`); const text=String(input?.value||'').trim();
+ if(!text)return toast('Écrivez un commentaire.');
+ const now=Date.now();
+ db.adminMessageComments.push({id:now,messageId:Number(messageId),memberId:Number(message.memberId),text,senderRole:currentRole==='member'?'member':'admin',senderProfileId:v53User()?.id||null,createdAt:now});
+ save();
+ try{if(v53Session())await v53SyncRemote();}catch(e){console.error(e);toast('Commentaire enregistré localement mais non synchronisé.');}
+ render();
+}
+function messageCommentHtml(message){
+ const comments=messageCommentsFor(message.id);
+ const canComment=currentRole==='member' ? Number(message.memberId)===Number(currentMemberId)&&message.visible!==false : canAdmin();
+ return `<div class="message-comments"><div class="field-label">Commentaires</div>${comments.length?comments.map(c=>`<div class="message-comment"><strong>${c.senderRole==='admin'?'Administrateur':'Adhérent'}</strong><div>${esc(c.text).replace(/\n/g,'<br>')}</div><span>${fmtDateTime(c.createdAt)}</span></div>`).join(''):'<div class="muted">Aucun commentaire.</div>'}${canComment?`<div class="message-comment-compose"><textarea id="messageComment_${message.id}" rows="2" placeholder="Ajouter un commentaire..."></textarea><button class="secondary" onclick="addAdminMessageComment(${message.id})">Commenter</button></div>`:''}</div>`;
+}
+function renderMessages(){
+ const el=document.getElementById('messagesView');if(!el)return;
+ if(currentRole==='member'){
+   const rows=(db.adminMessages||[]).filter(x=>Number(x.memberId)===Number(currentMemberId)&&x.visible!==false).sort((a,b)=>Number(a.createdAt)-Number(b.createdAt));
+   if(!rows.length){el.innerHTML='';return;}
+   el.innerHTML=`<section class="hero"><div><p class="eyebrow">MESSAGES</p><h1>Messages</h1><p>Votre discussion avec l’administrateur.</p></div></section><div class="card"><div class="message-thread">${rows.map(x=>`<div class="message-bubble ${x.senderRole==='admin'?'admin':'member'}"><strong>${x.senderRole==='admin'?'Administrateur':'Vous'}</strong><div>${esc(x.text).replace(/\n/g,'<br>')}</div><span>${fmtDateTime(x.createdAt)}</span>${messageCommentHtml(x)}</div>`).join('')}</div></div>`;return;
+ }
+ if(!canAdmin()){el.innerHTML='';return;}
+ const groups={};(db.adminMessages||[]).forEach(x=>{(groups[x.memberId] ||= []).push(x);});
+ const cards=Object.values(groups).sort((a,b)=>String(a[0].memberName).localeCompare(String(b[0].memberName),'fr-FR')).map(rows=>`<div class="card message-conversation"><div class="row"><div><strong>${esc(rows[0].memberName||'Adhérent')}</strong><div class="muted">${rows.length} message${rows.length>1?'s':''}</div></div></div>${rows.sort((a,b)=>Number(a.createdAt)-Number(b.createdAt)).map(x=>`<div class="message-bubble ${x.senderRole==='admin'?'admin':'member'}"><strong>${x.senderRole==='admin'?'Administrateur':'Adhérent'}</strong><div>${esc(x.text).replace(/\n/g,'<br>')}</div><span>${fmtDateTime(x.createdAt)}</span><button class="secondary" onclick="toggleAdminMessage(${x.id})">${x.visible===false?'Afficher':'Masquer'}</button>${messageCommentHtml(x)}</div>`).join('')}</div>`).join('');
+ el.innerHTML=`<section class="hero"><div><p class="eyebrow">ADMINISTRATION</p><h1>Messages</h1><p>Les échanges avec les adhérents sont regroupés par discussion.</p></div><button class="primary" onclick="openNewAdminMessageModal()">＋ Nouveau message</button></section>${cards||'<div class="empty">Aucun message.</div>'}`;
+}
+
 function renderAdminTools(){
  if(!canAdmin()) return "";
  const last=db.actionLog?.length?db.actionLog[db.actionLog.length-1]:null; const lastBackup=readStorageJson("sportclub-last-backup",null);
@@ -1521,6 +1673,7 @@ function setAdminRequestFilter(value){
  localStorage.setItem("sportclub-admin-request-filter",adminRequestFilter);
  renderMoves();
 }
+function setAdminRequestVisibility(type){ if(!canAdmin())return; if(!db.adminRequestVisibility)db.adminRequestVisibility={cancelled:false,rejected:false}; db.adminRequestVisibility[type]=!db.adminRequestVisibility[type]; save(); renderMoves(); }
 function renderMoves(){
  const currentWeek=weekKey();
  const pending=db.moves.filter(m=>m.status==='pending').sort((a,b)=>
@@ -1530,9 +1683,10 @@ function renderMoves(){
  );
  const pendingStatusRequests=(db.statusRequests||[]).filter(r=>r.status==='pending').sort(compareRequestWeekAsc);
  const history=getAllRequestHistory().filter(r=>['slot_change','status_change'].includes(r.type));
- const processed=history.filter(r=>r.status!=='pending').sort(compareRequestWeekDesc);
+ const processed=history.filter(r=>r.status!=='pending' && !((r.status==='cancelled'&&db.adminRequestVisibility?.cancelled)||(r.status==='rejected'&&db.adminRequestVisibility?.rejected))).sort(compareRequestWeekDesc);
  const showPending=adminRequestFilter==='pending'||adminRequestFilter==='all';
  const showProcessed=adminRequestFilter==='processed'||adminRequestFilter==='all';
+ const visibilityButtons=`<div class="request-visibility-tools"><button class="secondary" onclick="setAdminRequestVisibility('cancelled')">${db.adminRequestVisibility?.cancelled?'Afficher':'Masquer'} les demandes annulées</button><button class="secondary" onclick="setAdminRequestVisibility('rejected')">${db.adminRequestVisibility?.rejected?'Afficher':'Masquer'} les demandes refusées</button></div>`;
  const historyHtml=showProcessed&&processed.length?processed.map(r=>{
    let detail='';
    if(r.type==='slot_change') detail=`Semaine du ${fmt(r.week)} · ${slotLabel(r.from)} → ${slotLabel(r.to)}`;
@@ -1545,7 +1699,7 @@ function renderMoves(){
  const moveHtml=showPending&&pending.length?pending.map((x,index)=>{const name=x.name||db.members.find(m=>Number(m.id)===Number(x.memberId))?.name||'Adhérent';return `<div class="card"><div class="row"><div><strong>${index+1}. ${esc(name)}</strong><div class="muted">Demande de changement · semaine du ${fmt(x.week)} · ${slotLabel(x.from)} → ${slotLabel(x.to)}</div><div class="muted">${getChangeCount(x.memberId)} changement${getChangeCount(x.memberId)>1?'s':''} déjà effectué${getChangeCount(x.memberId)>1?'s':''} · envoyée le ${requestDateLabel(x.createdAt)}</div></div><div class="actions"><button class="primary" onclick="approveMove(${x.id})">Valider</button><button class="danger" onclick="rejectMove(${x.id})">Refuser</button></div></div></div>`;}).join(''):'<div class="empty">Aucune demande de changement de créneau en cours.</div>';
  const pendingTotal=pending.length+pendingStatusRequests.length;
  const processedTotal=processed.length;
- document.getElementById('movesView').innerHTML=`<div class="card"><div class="row"><div><h2>Demandes</h2><div class="muted">Filtrez les demandes en cours ou déjà traitées.</div></div><button class="primary" onclick="forceValidateMoves()">Lancer le traitement 13h30</button></div><div class="request-filter" role="group" aria-label="Filtrer les demandes"><button class="filter-btn ${adminRequestFilter==='pending'?'active':''}" onclick="setAdminRequestFilter('pending')">En cours (${pendingTotal})</button><button class="filter-btn ${adminRequestFilter==='processed'?'active':''}" onclick="setAdminRequestFilter('processed')">Traitées (${processedTotal})</button><button class="filter-btn ${adminRequestFilter==='all'?'active':''}" onclick="setAdminRequestFilter('all')">Toutes</button></div><div class="move-capacity">${SLOT_NAMES.map((n,i)=>`<span><strong>${n}</strong> ${counts[i]}/20 présents · ${targetPending[i]} demande${targetPending[i]>1?'s':''} en attente vers ce créneau</span>`).join('')}</div></div>${showPending?`<h3 class="request-section-title">Demandes en attente de modification de présence</h3>${statusRequestHtml}<h3 class="request-section-title">Demandes en attente de changement de créneau</h3>${moveHtml}`:''}${showProcessed?`<h3 class="request-section-title">Demandes traitées</h3>${historyHtml}`:''}`;
+ document.getElementById('movesView').innerHTML=`<div class="card"><div class="row"><div><h2>Demandes</h2>${visibilityButtons}<div class="muted">Filtrez les demandes en cours ou déjà traitées.</div></div><button class="primary" onclick="forceValidateMoves()">Lancer le traitement 13h30</button></div><div class="request-filter" role="group" aria-label="Filtrer les demandes"><button class="filter-btn ${adminRequestFilter==='pending'?'active':''}" onclick="setAdminRequestFilter('pending')">En cours (${pendingTotal})</button><button class="filter-btn ${adminRequestFilter==='processed'?'active':''}" onclick="setAdminRequestFilter('processed')">Traitées (${processedTotal})</button><button class="filter-btn ${adminRequestFilter==='all'?'active':''}" onclick="setAdminRequestFilter('all')">Toutes</button></div><div class="move-capacity">${SLOT_NAMES.map((n,i)=>`<span><strong>${n}</strong> ${counts[i]}/20 présents · ${targetPending[i]} demande${targetPending[i]>1?'s':''} en attente vers ce créneau</span>`).join('')}</div></div>${showPending?`<h3 class="request-section-title">Demandes en attente de modification de présence</h3>${statusRequestHtml}<h3 class="request-section-title">Demandes en attente de changement de créneau</h3>${moveHtml}`:''}${showProcessed?`<h3 class="request-section-title">Demandes traitées</h3>${historyHtml}`:''}`;
 }
 async function setMemberRole(id,role){
  if(!canManageRoles()) return toast("Seul l'administrateur peut gérer les rôles.");
@@ -1790,7 +1944,7 @@ function reorderTabsForRole(){
  const orders={
    member:['dashboard','member-history','request-history','objectives','calendar','events'],
    coach:['tdb','objectives','member-history','dashboard','moves','calendar','events'],
-   admin:['members','tdb','dashboard','moves','calendar','events','notifications']
+   admin:['members','tdb','dashboard','moves','calendar','events','notifications','messages']
  };
  const order=orders[currentRole]||orders.member;
  // Recompose the navigation from scratch in the exact role-specific order.
@@ -1815,6 +1969,8 @@ function syncTabs(){
  const tdbTab=document.getElementById("tdbTab");
  if(membersTab) membersTab.style.display=canAdmin()?"":"none";
  if(tdbTab) tdbTab.style.display=canCoach()?"":"none";
+ const messagesTab=document.getElementById("messagesTab");
+ if(messagesTab){const hasVisibleMemberMessages=(db.adminMessages||[]).some(x=>Number(x.memberId)===Number(currentMemberId)&&x.visible!==false);messagesTab.style.display=canAdmin()?"":(currentRole==="member"&&hasVisibleMemberMessages?"":"none");}
  const notifTab=document.getElementById("notificationsTab");
  if(notifTab) notifTab.style.display=canAdmin()?"":"none";
  const active=document.querySelector(".tab.active");
@@ -1832,6 +1988,7 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
  if(b.dataset.view==="tdb")renderTdb();
  if(b.dataset.view==="objectives")renderObjectives();
  if(b.dataset.view==="notifications")renderNotifications();
+ if(b.dataset.view==="messages")renderMessages();
 });
 document.getElementById("notifyBtn").onclick=async()=>{if(!("Notification" in window))return toast("Notifications non supportées par ce navigateur."); const p=await Notification.requestPermission();toast(p==="granted"?"Notifications activées":"Notifications non activées")};
 function toast(t){const x=document.getElementById("toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2500)}
@@ -1962,10 +2119,25 @@ function v53MapWeekType(t){
   return ['course','free','holiday','public-holiday','off','cancelled'].includes(x)?x:'course';
 }
 function v53MapDbFromRemote(rows){
-  const out={members:[],attendance:{},actualAttendance:{},quotas:{1:30,2:30,3:30},moves:[],absencePeriods:[],statusRequests:[],objectiveComments:[],objectiveReactions:[],coachNotesByDate:{},actionLog:[]};
+  const out={members:[],attendance:{},actualAttendance:{},quotas:{1:30,2:30,3:30},moves:[],absencePeriods:[],statusRequests:[],objectiveComments:[],objectiveReactions:[],coachNotesByDate:{},actionLog:[],adminMessages:[],adminMessageComments:[],notificationPrograms:{},manualNotification:{content:'',recipients:{member:true,coach:false,admin:false}}};
   const profiles=rows.profiles||[];
   const roleByMember=new Map(profiles.filter(p=>p.member_id!=null).map(p=>[Number(p.member_id),normalizeRole(p.role)]));
-  out.members=(rows.members||[]).map(m=>{const prof=profiles.find(p=>Number(p.member_id)===Number(m.id));return {id:Number(m.id),name:m.name,slot:m.habitual_slot==null?null:Number(m.habitual_slot),active:m.active!==false,changeCount:Number(m.change_count||0),role:normalizeRole(m.role||roleByMember.get(Number(m.id))||'member'),authEmail:prof?.auth_email||'',mustChangePassword:!!prof?.must_change_password};});
+  out.members=(rows.members||[]).map(m=>{const prof=profiles.find(p=>Number(p.member_id)===Number(m.id));return {id:Number(m.id),name:m.name,slot:m.habitual_slot==null?null:Number(m.habitual_slot),active:m.active!==false,changeCount:Number(m.change_count||0),role:normalizeRole(m.role||roleByMember.get(Number(m.id))||'member'),authEmail:prof?.auth_email||'',profileId:prof?.id||'',mustChangePassword:!!prof?.must_change_password,notificationStatus:'none',notificationSubscriptions:0,notificationActiveSubscriptions:0,notificationDisabledByUser:false};});
+  const pushByProfile=new Map();
+  (rows.push_subscriptions||[]).forEach(sub=>{
+    const key=String(sub.profile_id||''); if(!key) return;
+    const item=pushByProfile.get(key)||{total:0,active:0,disabledByUser:false};
+    item.total++;
+    if(sub.active===true) item.active++;
+    if(sub.disabled_by_user===true) item.disabledByUser=true;
+    pushByProfile.set(key,item);
+  });
+  const profileIdByMember=new Map(profiles.filter(p=>p.member_id!=null).map(p=>[Number(p.member_id),String(p.id)]));
+  out.members.forEach(m=>{
+    const st=pushByProfile.get(profileIdByMember.get(Number(m.id))||'')||{total:0,active:0,disabledByUser:false};
+    m.notificationSubscriptions=st.total; m.notificationActiveSubscriptions=st.active; m.notificationDisabledByUser=!!st.disabledByUser;
+    m.notificationStatus=st.active>0?'active':(st.disabledByUser?'user_disabled':(st.total>0?'inactive':'none'));
+  });
   (rows.quotas||[]).forEach(q=>{out.quotas[Number(q.slot)]=Number(q.quota);});
   (rows.attendance||[]).forEach(a=>{out.attendance[`${a.week_start}_${a.member_id}`]=a.status;});
   (rows.actual_attendance||[]).forEach(a=>{out.actualAttendance[`${a.week_start}_${a.slot}`]=Number(a.count||0);});
@@ -1977,6 +2149,10 @@ function v53MapDbFromRemote(rows){
   out.objectiveComments=(rows.objective_comments||[]).map(x=>({id:Number(x.id),sessionDate:x.session_date,memberId:Number(x.member_id),text:x.text,anonymous:!!x.anonymous,createdAt:new Date(x.created_at).getTime()}));
   out.objectiveReactions=(rows.objective_reactions||[]).map(x=>({sessionDate:x.session_date,memberId:Number(x.member_id),reaction:x.reaction,createdAt:new Date(x.created_at).getTime()}));
   (rows.coach_notes||[]).forEach(x=>{out.coachNotesByDate[x.session_date]=x.note||'';});
+  out.adminMessages=(rows.admin_messages||[]).map(x=>({id:Number(x.id),memberId:Number(x.member_id),memberName:out.members.find(m=>m.id===Number(x.member_id))?.name||'Adhérent',text:x.content,visible:x.visible!==false,senderRole:x.sender_role||'member',senderProfileId:x.sender_profile_id||null,createdAt:new Date(x.created_at).getTime(),updatedAt:x.updated_at?new Date(x.updated_at).getTime():0}));
+  out.adminMessageComments=(rows.admin_message_comments||[]).map(x=>({id:Number(x.id),messageId:Number(x.message_id),memberId:Number(x.member_id),text:x.content,senderRole:x.sender_role||'member',senderProfileId:x.sender_profile_id||null,createdAt:new Date(x.created_at).getTime()}));
+  out.notificationPrograms={}; (rows.custom_notification_programs||[]).forEach(r=>{out.notificationPrograms[r.id]={id:r.id,active:r.active,title:r.title,content:r.content,mode:r.mode,days:r.days||[],weekTypes:r.week_types||[],time:String(r.send_time||'12:00').slice(0,5),recipients:{member:(r.recipients||[]).includes('member'),coach:(r.recipients||[]).includes('coach'),admin:(r.recipients||[]).includes('admin')}}});
+  const mc=rows.manual_notification_settings?.[0]; if(mc) out.manualNotification={content:mc.content||'',recipients:{member:(mc.recipients||[]).includes('member'),coach:(mc.recipients||[]).includes('coach'),admin:(mc.recipients||[]).includes('admin')}};
   out.actionLog=(rows.action_log||[]).map(x=>({id:Number(x.id),date:x.created_at,actor:'Supabase',action:x.action,details:x.details||''}));
   return out;
 }
@@ -2022,8 +2198,9 @@ async function v53LoadRemote(){
     }
   }
 
-  const names=['members','profiles','quotas','attendance','actual_attendance','slot_change_requests','absence_periods','status_change_requests','calendar_weeks','calendar_events','calendar_settings','session_objectives','objective_comments','objective_reactions'];
+  const names=['members','profiles','quotas','attendance','actual_attendance','slot_change_requests','absence_periods','status_change_requests','calendar_weeks','calendar_events','calendar_settings','session_objectives','objective_comments','objective_reactions','admin_messages','admin_message_comments','information_banner','custom_notification_programs','manual_notification_settings'];
   if(profile.role!=='member') names.push('coach_notes','action_log');
+  if(profile.role==='admin') names.push('push_subscriptions');
   const results=await Promise.all(names.map(async table=>{
     const {data,error}=await sb.from(table).select('*');
     if(error) throw new Error(`${table}: ${error.message}`);
@@ -2035,6 +2212,7 @@ async function v53LoadRemote(){
   db=remoteDb;
   normalizeDb();
   db.members.forEach(m=>{ delete m.password; });
+  if(rows.information_banner?.[0]){ const b=rows.information_banner[0]; db.informationBanner={active:b.active!==false,content:b.content||''}; }
   if(rows.calendar_settings?.[0]){
     const c=rows.calendar_settings[0];
     calendarData.period={start:c.start_date,end:c.end_date};
@@ -2043,7 +2221,7 @@ async function v53LoadRemote(){
   (rows.calendar_weeks||[]).forEach(w=>{calendarData.weeks[w.week_start]={type:v53MapWeekType(w.week_type),label:w.label||w.week_type,reportDate:w.report_date||null};});
   calendarData.events=(rows.calendar_events||[]).map(e=>({id:Number(e.id),date:e.event_date,eventType:e.event_type,title:e.title,reportDate:e.report_date||null}));
   ensureCalendarCourseMondays();
-  if(profile.role==='admin'){ await v63LoadAccountStatus(); await v121LoadCredentialEmailStatus(); await loadNotificationSettings(); }
+  if(profile.role==='admin'){ await v63LoadAccountStatus(); await v121LoadCredentialEmailStatus(); await loadNotificationSettings(); try{ const {data:np}=await sb.from('custom_notification_programs').select('*'); (np||[]).forEach(r=>db.notificationPrograms[r.id]={...programSetting(r.id),id:r.id,active:r.active,title:r.title,content:r.content,mode:r.mode,days:r.days||[],weekTypes:r.week_types||[],time:String(r.send_time||'12:00').slice(0,5),recipients:{member:(r.recipients||[]).includes('member'),coach:(r.recipients||[]).includes('coach'),admin:(r.recipients||[]).includes('admin')}}); const {data:mn}=await sb.from('manual_notification_settings').select('*').eq('id',true).maybeSingle(); if(mn)db.manualNotification={content:mn.content||'',recipients:{member:(mn.recipients||[]).includes('member'),coach:(mn.recipients||[]).includes('coach'),admin:(mn.recipients||[]).includes('admin')}}; }catch(e){console.warn('[V130] paramètres personnalisés non chargés',e);} }
   v53.hydrated=true;
   return true;
 }
@@ -2100,6 +2278,14 @@ async function v53SyncRemote(){
       if(comments.length){r=await sb.from('objective_comments').upsert(comments,{onConflict:'id'});if(r.error)throw r.error;}
       const reactions=(db.objectiveReactions||[]).map(x=>({session_date:x.sessionDate,member_id:Number(x.memberId),reaction:x.reaction}));
       if(reactions.length){r=await sb.from('objective_reactions').upsert(reactions,{onConflict:'session_date,member_id'});if(r.error)throw r.error;}
+      const programs=Object.values(db.notificationPrograms||{}).map(p=>({id:Number(p.id),active:!!p.active,title:String(p.title||''),content:String(p.content||''),mode:p.mode==='week_types'?'week_types':'days',days:(p.days||[]).map(Number),week_types:p.weekTypes||[],send_time:String(p.time||'12:00'),recipients:Object.entries(p.recipients||{}).filter(([,v])=>v).map(([k])=>k),updated_by:user.id}));
+      if(programs.length){r=await sb.from('custom_notification_programs').upsert(programs,{onConflict:'id'});if(r.error)throw r.error;}
+      const manualCfg={id:true,content:String(db.manualNotification?.content||''),recipients:Object.entries(db.manualNotification?.recipients||{}).filter(([,v])=>v).map(([k])=>k),updated_by:user.id};
+      r=await sb.from('manual_notification_settings').upsert(manualCfg,{onConflict:'id'});if(r.error)throw r.error;
+      const adminMessages=(db.adminMessages||[]).map(x=>({id:Number(x.id),member_id:Number(x.memberId),content:String(x.text||''),visible:x.visible!==false,sender_profile_id:x.senderProfileId||null,sender_role:x.senderRole||'member',updated_at:new Date(x.updatedAt||x.createdAt||Date.now()).toISOString()}));
+      if(adminMessages.length){r=await sb.from('admin_messages').upsert(adminMessages,{onConflict:'id'});if(r.error)throw r.error;}
+      const adminMessageComments=(db.adminMessageComments||[]).map(x=>({id:Number(x.id),message_id:Number(x.messageId),member_id:Number(x.memberId),content:String(x.text||''),sender_profile_id:x.senderProfileId||null,sender_role:x.senderRole||'member'}));
+      if(adminMessageComments.length){r=await sb.from('admin_message_comments').upsert(adminMessageComments,{onConflict:'id'});if(r.error)throw r.error;}
       const notes=Object.entries(db.coachNotesByDate||{}).map(([session_date,note])=>({session_date,note:String(note||''),updated_by:user.id}));
       if(notes.length){r=await sb.from('coach_notes').upsert(notes,{onConflict:'session_date'});if(r.error)throw r.error;}
     } else if(mid!=null){
@@ -2117,6 +2303,11 @@ async function v53SyncRemote(){
       // Les demandes créées par l'adhérent sont insérées une seule fois.
       for(const x of ownMoves){const payload={id:Number(x.id),week_start:x.week,member_id:Number(mid),requested_slot:Number(x.to),status:x.status||'pending',decided_at:(x.approvedAt||x.rejectedAt||x.cancelledAt)?new Date(x.approvedAt||x.rejectedAt||x.cancelledAt).toISOString():null,decided_by:user.id};const r=await sb.from('slot_change_requests').upsert(payload,{onConflict:'id'});if(r.error)throw r.error;}
       for(const x of ownStatuses){const payload={id:Number(x.id),member_id:Number(mid),week_start:x.week,requested_status:x.requestedStatus,event_date:x.eventDate||null,reason:x.reason||null,status:x.status||'pending',decided_at:(x.approvedAt||x.rejectedAt||x.cancelledAt)?new Date(x.approvedAt||x.rejectedAt||x.cancelledAt).toISOString():null,decided_by:user.id};const r=await sb.from('status_change_requests').upsert(payload,{onConflict:'id'});if(r.error)throw r.error;}
+      const ownMessages=(db.adminMessages||[]).filter(x=>Number(x.memberId)===Number(mid)&&x.senderRole!=='admin').map(x=>({id:Number(x.id),member_id:Number(mid),content:String(x.text||''),visible:x.visible!==false,sender_profile_id:x.senderProfileId||user.id,sender_role:'member',updated_at:new Date(x.updatedAt||x.createdAt||Date.now()).toISOString()}));
+      if(ownMessages.length){const r=await sb.from('admin_messages').upsert(ownMessages,{onConflict:'id'});if(r.error)throw r.error;}
+      const ownMessageIds=(db.adminMessages||[]).filter(x=>Number(x.memberId)===Number(mid)).map(x=>Number(x.id));
+      const ownMessageComments=(db.adminMessageComments||[]).filter(x=>ownMessageIds.includes(Number(x.messageId)) && String(x.senderRole||'member')==='member' && Number(x.memberId)===Number(mid)).map(x=>({id:Number(x.id),message_id:Number(x.messageId),member_id:Number(mid),content:String(x.text||''),sender_profile_id:x.senderProfileId||user.id,sender_role:'member'}));
+      if(ownMessageComments.length){const r=await sb.from('admin_message_comments').upsert(ownMessageComments,{onConflict:'id'});if(r.error)throw r.error;}
     }
     console.info('[V53] Synchronisation Supabase terminée.');
   }catch(e){
@@ -2509,7 +2700,7 @@ window.addEventListener('offline',()=>{
     const sb=v53Client(), user=v53User(); if(!sb||!user) throw new Error('Connexion requise.');
     const row=subscriptionRow(sub,user.id);
     if(!row.endpoint||!row.p256dh||!row.auth) throw new Error('Abonnement Push incomplet.');
-    const {error}=await sb.from('push_subscriptions').upsert(row,{onConflict:'profile_id,endpoint'});
+    row.disabled_by_user=false; const {error}=await sb.from('push_subscriptions').upsert(row,{onConflict:'profile_id,endpoint'});
     if(error) throw error;
   }
   async function deactivateDbSubscription(sub){
@@ -2519,7 +2710,7 @@ window.addEventListener('offline',()=>{
   }
   async function removeSubscription(sub){
     const sb=v53Client(), user=v53User(); if(!sb||!user||!sub) return;
-    const {error}=await sb.from('push_subscriptions').delete().eq('profile_id',user.id).eq('endpoint',sub.endpoint);
+    const {error}=await sb.from('push_subscriptions').update({active:false,disabled_by_user:true,updated_at:new Date().toISOString()}).eq('profile_id',user.id).eq('endpoint',sub.endpoint);
     if(error) console.warn('[V83] Suppression abonnement impossible.',error);
   }
   async function updateButton(){

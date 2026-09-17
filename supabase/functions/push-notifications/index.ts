@@ -9,6 +9,100 @@ const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY') || ''
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') || 'https://contactdbbn.github.io/don-bosco-perfectionnement/'
 const CRON_SECRET = Deno.env.get('PUSH_CRON_SECRET') || ''
 const APP_URL = 'https://contactdbbn.github.io/don-bosco-perfectionnement/'
+
+function cleanSecret(value: string) {
+  return String(value || '').trim().replace(/^['"]|['"]$/g, '').replace(/\s+/g, '')
+}
+function decodeBase64(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4)
+  const raw = atob(normalized)
+  return Uint8Array.from(raw, c => c.charCodeAt(0))
+}
+function encodeBase64Url(bytes: Uint8Array) {
+  let raw = ''
+  for (const b of bytes) raw += String.fromCharCode(b)
+  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+function derLength(n: number) {
+  if (n < 128) return new Uint8Array([n])
+  const bytes: number[] = []
+  let v = n
+  while (v > 0) { bytes.unshift(v & 0xff); v >>>= 8 }
+  return new Uint8Array([0x80 | bytes.length, ...bytes])
+}
+function der(tag: number, content: Uint8Array) {
+  const len = derLength(content.length)
+  const out = new Uint8Array(1 + len.length + content.length)
+  out[0] = tag
+  out.set(len, 1)
+  out.set(content, 1 + len.length)
+  return out
+}
+function concatBytes(...parts: Uint8Array[]) {
+  const total = parts.reduce((n, p) => n + p.length, 0)
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const p of parts) { out.set(p, offset); offset += p.length }
+  return out
+}
+function rawVapidPrivateKeyToPkcs8(raw: Uint8Array) {
+  if (raw.length !== 32) throw new Error(`clé privée décodée à ${raw.length} octets au lieu de 32`)
+  // PKCS#8 PrivateKeyInfo for an EC P-256 private scalar.
+  // AlgorithmIdentifier = id-ecPublicKey + prime256v1.
+  const version = der(0x02, new Uint8Array([0x00]))
+  const algorithm = der(0x30, concatBytes(
+    der(0x06, new Uint8Array([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])),
+    der(0x06, new Uint8Array([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]))
+  ))
+  const ecPrivateKey = der(0x30, concatBytes(
+    der(0x02, new Uint8Array([0x01])),
+    der(0x04, raw)
+  ))
+  return der(0x30, concatBytes(version, algorithm, der(0x04, ecPrivateKey)))
+}
+function bytesToBase64(bytes: Uint8Array) {
+  let raw = ''
+  for (const b of bytes) raw += String.fromCharCode(b)
+  return btoa(raw)
+}
+function normalizeVapidPrivateKey(value: string) {
+  let key = cleanSecret(value)
+  if (!key) return ''
+  const pem = key.replace(/\\n/g, '\n')
+  // web-push-browser@1.4.2 expects the private key serialized as PKCS#8.
+  // Supabase projects often store the standard VAPID 32-byte scalar instead.
+  if (pem.includes('BEGIN PRIVATE KEY')) {
+    const body = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s+/g, '')
+    // Keep a valid PKCS#8 PEM as base64 for deserializeVapidKeys.
+    try {
+      const bytes = decodeBase64(body)
+      crypto.subtle.importKey('pkcs8', bytes, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']).catch(() => {})
+      return encodeBase64Url(bytes)
+    } catch (_) {}
+  }
+  if (/^[0-9a-fA-F]{64}$/.test(key)) {
+    return encodeBase64Url(rawVapidPrivateKeyToPkcs8(Uint8Array.from(key.match(/../g)!.map(x => parseInt(x, 16)))))
+  }
+  try {
+    const bytes = decodeBase64(key)
+    if (bytes.length === 32) return encodeBase64Url(rawVapidPrivateKeyToPkcs8(bytes))
+    // Already PKCS#8: validate it before passing it to web-push-browser.
+    crypto.subtle.importKey('pkcs8', bytes, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign'])
+    return encodeBase64Url(bytes)
+  } catch (e) {
+    throw new Error(`VAPID_PRIVATE_KEY invalide : ${String((e as any)?.message || e)}`)
+  }
+}
+function normalizeVapidPublicKey(value: string) {
+  const key = cleanSecret(value).replace(/\\n/g, '')
+  if (!key) return ''
+  try {
+    const bytes = decodeBase64(key)
+    if (bytes.length === 65) return encodeBase64Url(bytes)
+  } catch (_) {}
+  return key
+}
+
 const DEFAULT_SETTINGS: Record<string, {active:boolean,days:number[],start:string,end:string}> = {
   attendance_reminder:{active:true,days:[0],start:'18:00',end:'18:05'},
   new_slot_request:{active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'},
@@ -82,7 +176,7 @@ function isoWeekMonday(date = new Date()) {
 async function sendToProfile(profileId: string, title: string, body: string, data: Record<string, unknown> = {}) {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) throw new Error('VAPID keys not configured.')
   console.log(`[push] envoi demandé profile=${profileId} title="${title}"`)
-  const keys = await deserializeVapidKeys({ publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY })
+  const keys = await deserializeVapidKeys({ publicKey: normalizeVapidPublicKey(VAPID_PUBLIC_KEY), privateKey: await normalizeVapidPrivateKey(VAPID_PRIVATE_KEY) })
   const { data: subscriptions, error } = await admin
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
@@ -328,11 +422,15 @@ async function sendManualAttendanceConfirmed(requestedWeek?: string) {
 }
 
 async function dispatch() {
+  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString()
   const now = parisNow()
   console.log(`[push][dispatch] démarrage date=${now.date} heure=${String(now.hour).padStart(2,'0')}:${String(now.minute).padStart(2,'0')} jour=${weekdayFromDate(now.date)}`)
   const week = isoWeekMonday()
   let sent = 0
   const settings = await loadNotificationSettings()
+  const staffWindow = settings.staff_delivery_window || {active:true,days:[0,1,2,3,4,5,6],start:'07:00',end:'23:00'}
+  const staffWindowActive = withinWindow(now, staffWindow)
+  console.log(`[push][staff_window] fenêtre=${staffWindowActive ? 'ACTIVE' : 'INACTIVE'} jours=${staffWindow.days.join(',')} heures=${staffWindow.start}-${staffWindow.end}`)
 
   // 1) Rappel de présence. Le jour et l'heure sont entièrement pilotés par
   // l'administration. Quel que soit le jour choisi, le rappel concerne la
@@ -448,12 +546,12 @@ async function dispatch() {
     .eq('active',true)
   if (staffError) throw staffError
 
-  console.log(`[push][new_slot_request] fenêtre=${withinWindow(now, settings.new_slot_request) ? 'ACTIVE' : 'INACTIVE'} demandes_en_attente=${newMoves?.length || 0} destinataires=${staff?.length || 0}`)
-  if (withinWindow(now, settings.new_slot_request)) for (const req of newMoves || []) {
+  console.log(`[push][new_slot_request] fenêtre=${staffWindowActive ? 'ACTIVE' : 'INACTIVE'} demandes_en_attente=${newMoves?.length || 0} destinataires=${staff?.length || 0}`)
+  if (staffWindowActive && settings.new_slot_request.active)  for (const req of newMoves || []) {
     const title = 'Nouvelle demande de présence'
     const body = `Une demande de modification de présence est en attente pour la semaine du ${new Date(`${req.week_start}T12:00:00`).toLocaleDateString('fr-FR')}.`
     for (const s of staff || []) {
-      const delivered = await deliverOnce(s.id, 'new_status_request', String(req.id), title, body, { type:'status_request', requestId:req.id })
+      const delivered = await deliverOnce(s.id, 'new_slot_request', String(req.id), title, body, { type:'slot_request', requestId:req.id })
       if (delivered > 0) sent += delivered
     }
   }
@@ -520,9 +618,20 @@ export default {
         if (!await authenticateAdmin(req)) return json({ error: 'Réservé à l’administrateur.' }, 403)
         return json(await sendManualAttendanceConfirmed(body?.week))
       }
+      if (action === 'custom_manual') {
+        if (!await authenticateAdmin(req)) return json({ error: 'Réservé à l’administrateur.' }, 403)
+        const roles = (body?.recipients || []).filter((r:string)=>['member','coach','admin'].includes(r))
+        if (!roles.length) return json({ error: 'Aucun destinataire.' }, 400)
+        const { data: profiles, error } = await admin.from('profiles').select('id,role,active').in('role', roles).eq('active', true)
+        if (error) throw error
+        let sent=0
+        const eventKey=String(body?.event_key || `manual-${Date.now()}`)
+        for (const profile of profiles||[]) sent += await deliverOnce(profile.id,'custom_manual',eventKey,String(body?.title||'Don Bosco - Perfectionnement'),String(body?.body||''),{type:'custom_manual'})
+        return json({ok:true,sent})
+      }
       return json({ error: 'Action inconnue.' }, 400)
     } catch (e) {
-      console.error('[V106 push-notifications]', e)
+      console.error('[V134 push-notifications]', e)
       return json({ error: String((e as any)?.message || e) }, 500)
     }
   }
