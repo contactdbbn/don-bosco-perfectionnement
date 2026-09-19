@@ -173,11 +173,11 @@ img,svg,canvas{max-width:100%;}
   .role-box select{width:150px;max-width:100%;min-height:42px;padding:8px 10px;}
   .current-user-name{grid-area:user;max-width:120px;min-width:0;padding:7px 9px;font-size:11px;overflow:hidden;text-overflow:ellipsis;}
   .topbar>#connectionStatus{display:none;}
-  .topbar>#syncNowBtn,.topbar>#notifyBtn{grid-area:actions;min-width:42px;width:42px;padding:8px 9px;overflow:hidden;white-space:nowrap;}
+  .topbar>#syncNowBtn,.topbar>#notifyBtn{grid-area:actions;min-width:42px;width:42px;height:42px;padding:8px;overflow:hidden;white-space:nowrap;}
   .topbar>#syncNowBtn{font-size:0;}
   .topbar>#syncNowBtn::after{content:"↻";font-size:19px;}
-  .topbar>#notifyBtn{font-size:0;}
-  .topbar>#notifyBtn::after{content:"🔔";font-size:17px;}
+  .topbar>#notifyBtn{font-size:0;display:inline-flex;align-items:center;justify-content:center;}
+  .topbar>#notifyBtn .notify-label{display:none;}
   .topbar>#profileBtn{grid-area:profile;min-width:64px;padding:8px 10px;}
 
   .container{width:100%;max-width:100%;margin:0;padding:18px 12px 80px;}
@@ -389,3 +389,19 @@ img,svg,canvas{max-width:100%;}
 @media print{body>*:not(#coachPrintArea){display:none!important}#coachPrintArea{display:block!important;padding:20mm 15mm;font-family:Arial,sans-serif;color:#111;background:#fff}#coachPrintArea h1{font-size:22px;margin:0 0 8px;page-break-before:auto}#coachPrintArea section{page-break-before:always;margin-bottom:20px}#coachPrintArea section:first-of-type{page-break-before:auto}#coachPrintArea table{width:100%;border-collapse:collapse;margin-top:14px}#coachPrintArea th,#coachPrintArea td{border:1px solid #999;padding:7px;font-size:11px;text-align:left}#coachPrintArea .card{border:1px solid #ddd;padding:10px;margin:8px 0;break-inside:avoid}#coachPrintArea .hidden{display:none!important}}
 
 .message-comments{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);display:grid;gap:8px}.message-comment{padding:8px 10px;border-radius:9px;background:rgba(0,0,0,.03);font-size:13px}.message-comment span{display:block;color:var(--muted);font-size:10px;margin-top:4px}.message-comment-compose{display:grid;gap:7px}.message-comment-compose textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #d7dce5;border-radius:9px;font:inherit;resize:vertical}.message-comment-compose button{justify-self:start}
+
+
+/* V142 — Icône Push native, visible sur mobile sans dépendre des emojis */
+.notify-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;}
+.notify-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.notify-svg{width:21px;height:21px;display:block;}
+.notify-slash{opacity:0;transition:opacity .15s ease;}
+.notify-btn.push-disabled .notify-slash{opacity:1;}
+.notify-btn.push-active{border-color:#bfe6d3;background:#e9f7f1;color:var(--green);}
+.notify-btn.push-disabled{border-color:#ffd0d6;background:#fff0f1;color:var(--red);}
+.notify-btn.push-unknown{color:var(--text);}
+@media(max-width:900px){
+  .topbar>#notifyBtn.push-active{border-color:#bfe6d3;background:#e9f7f1;color:var(--green);}
+  .topbar>#notifyBtn.push-disabled{border-color:#ffd0d6;background:#fff0f1;color:var(--red);}
+  .topbar>#notifyBtn.push-unknown{background:#fff;color:var(--text);}
+}

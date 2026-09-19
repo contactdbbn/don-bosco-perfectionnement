@@ -983,6 +983,7 @@ function addEventFromForm(){
  }
  if(!created) return toast("Aucun événement n'a pu être ajouté dans la période sélectionnée.");
  saveCalendar();renderCalendar();renderEvents();renderMemberHistory();
+ v143SyncCalendarNow();
  document.getElementById("calendarEventTitle").value="";
  document.getElementById("calendarEventStart").value=date;
  document.getElementById("calendarEventEnd").value=date;
@@ -1170,6 +1171,11 @@ function eventSectionRows(items){
 }
 function renderEvents(){
  const el=document.getElementById('eventsView'); if(!el)return;
+ try{
+  if(!calendarData || typeof calendarData!=='object') calendarData={weeks:{},events:[],period:{start:'2026-09-01',end:'2027-08-31'}};
+  if(!calendarData.weeks || typeof calendarData.weeks!=='object' || Array.isArray(calendarData.weeks)) calendarData.weeks={};
+  if(!Array.isArray(calendarData.events)) calendarData.events=[];
+  if(!calendarData.period || typeof calendarData.period!=='object') calendarData.period={start:'2026-09-01',end:'2027-08-31'};
  const weeks=getWeekTypeRows();
  const holidays=getEventsByType('Férié');
  const cancelled=getEventsByType('Cours annulé');
@@ -1208,6 +1214,10 @@ function renderEvents(){
    ${canManageEvents()?`<div class="calendar-event-admin"><div><strong>Ajouter un événement</strong><div class="muted">Ajoutez un événement sur une date ou sur toute une période, avec possibilité d'une semaine sur deux.</div></div><div class="calendar-period-fields"><label>Nom de l'événement<input id="calendarEventTitle" type="text" placeholder="Ex. Stage, réunion…" autocomplete="off"></label><label>Du<input id="calendarEventStart" type="date" value="${getCalendarPeriod().start}"></label><label>Au<input id="calendarEventEnd" type="date" value="${getCalendarPeriod().start}"></label><label style="flex-direction:row;align-items:center;gap:8px;margin-bottom:10px"><input id="calendarEventAlternate" type="checkbox" style="width:auto"> Une semaine sur deux</label><button class="primary" onclick="addEventFromForm()">+ Ajouter l'événement</button></div></div>`:''}
    <div class="special-events-list">${otherRows||'<div class="empty">Aucun autre événement dans la période.</div>'}</div>
  </div></details>`;
+ }catch(error){
+  console.error('[V145] Rendu de la page Événements impossible.',error);
+  el.innerHTML=`<section class="card"><h2>Événements</h2><div class="muted">Les données du calendrier sont en cours de remise en forme. Rechargez la page après synchronisation.</div><div class="muted" style="margin-top:8px">Erreur technique : ${esc(error?.message||'donnée invalide')}</div></section>`;
+ }
 }
 function calendarPrev(){const p=getCalendarPeriod(),min=new Date(p.start+"T12:00:00");calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()-1,1);if(calendarCursor<new Date(min.getFullYear(),min.getMonth(),1))calendarCursor=new Date(min.getFullYear(),min.getMonth(),1);renderCalendar()}
 function calendarNext(){const p=getCalendarPeriod(),max=new Date(p.end+"T12:00:00");calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+1,1);if(calendarCursor>new Date(max.getFullYear(),max.getMonth(),1))calendarCursor=new Date(max.getFullYear(),max.getMonth(),1);renderCalendar()}
@@ -1982,13 +1992,18 @@ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
  b.classList.add("active");
  document.querySelectorAll(".view").forEach(x=>x.classList.add("hidden"));
  document.getElementById(b.dataset.view+"View").classList.remove("hidden");
- if(b.dataset.view==="calendar")renderCalendar();
- if(b.dataset.view==="events")renderEvents();
- if(b.dataset.view==="member-history")renderMemberHistory();
- if(b.dataset.view==="tdb")renderTdb();
- if(b.dataset.view==="objectives")renderObjectives();
- if(b.dataset.view==="notifications")renderNotifications();
- if(b.dataset.view==="messages")renderMessages();
+ try{
+   if(b.dataset.view==="calendar")renderCalendar();
+   if(b.dataset.view==="events")renderEvents();
+   if(b.dataset.view==="member-history")renderMemberHistory();
+   if(b.dataset.view==="tdb")renderTdb();
+   if(b.dataset.view==="objectives")renderObjectives();
+   if(b.dataset.view==="notifications")renderNotifications();
+   if(b.dataset.view==="messages")renderMessages();
+ }catch(error){
+   console.error('[V145] Rendu de page impossible.',error);
+   toast(`Erreur d'affichage : ${error?.message||'donnée invalide'}`);
+ }
 });
 document.getElementById("notifyBtn").onclick=async()=>{if(!("Notification" in window))return toast("Notifications non supportées par ce navigateur."); const p=await Notification.requestPermission();toast(p==="granted"?"Notifications activées":"Notifications non activées")};
 function toast(t){const x=document.getElementById("toast");x.textContent=t;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2500)}
@@ -2181,7 +2196,11 @@ async function v53LoadRemote(){
   if(forcedAt && issuedAt && forcedAt>issuedAt+1){ const err=new Error('Cette session a été déconnectée par un administrateur.'); err.code='V68_FORCE_LOGOUT'; throw err; }
   v53.role=profile.role; v53.memberId=profile.member_id==null?null:Number(profile.member_id); v53.mustChangePassword=!!profile.must_change_password; v53.displayName=String(profile.display_name||'');
   currentMemberId=v53.memberId;
-  authState=profile.role; currentRole=profile.role;
+  authState=profile.role;
+  // V145 : après authentification/synchronisation, un compte administrateur
+  // revient en mode Administrateur. Le mode Adhérent peut ensuite être choisi
+  // volontairement depuis le sélecteur.
+  currentRole=profile.role==='admin'?'admin':profile.role;
   memberLoggedIn=profile.role==='member'; staffLoggedIn=profile.role!=='member';
   localStorage.setItem('sportclub-role',currentRole);
   localStorage.setItem('sportclub-auth-role',authState);
@@ -2201,9 +2220,27 @@ async function v53LoadRemote(){
   const names=['members','profiles','quotas','attendance','actual_attendance','slot_change_requests','absence_periods','status_change_requests','calendar_weeks','calendar_events','calendar_settings','session_objectives','objective_comments','objective_reactions','admin_messages','admin_message_comments','information_banner','custom_notification_programs','manual_notification_settings'];
   if(profile.role!=='member') names.push('coach_notes','action_log');
   if(profile.role==='admin') names.push('push_subscriptions');
+  // V144 : une erreur RLS/lecture sur une table secondaire ne doit plus
+  // invalider toute la session d'administration. Cela évite que les onglets
+  // TDB / Événements / Notifications / Messages soient grisés après une
+  // erreur de synchronisation du calendrier. Les tables d'identité restent
+  // bloquantes ; les autres conservent leurs données locales par défaut.
+  const remoteOptionalTables=new Set([
+    'quotas','attendance','actual_attendance','slot_change_requests','absence_periods',
+    'status_change_requests','calendar_weeks','calendar_events','calendar_settings',
+    'session_objectives','objective_comments','objective_reactions','admin_messages',
+    'admin_message_comments','information_banner','custom_notification_programs',
+    'manual_notification_settings','coach_notes','action_log','push_subscriptions'
+  ]);
   const results=await Promise.all(names.map(async table=>{
     const {data,error}=await sb.from(table).select('*');
-    if(error) throw new Error(`${table}: ${error.message}`);
+    if(error){
+      if(remoteOptionalTables.has(table)){
+        console.warn(`[V144] Lecture ${table} impossible ; conservation des données locales.`,error);
+        return [table,[]];
+      }
+      throw new Error(`${table}: ${error.message}`);
+    }
     return [table,data||[]];
   }));
   const rows=Object.fromEntries(results);
@@ -2233,6 +2270,61 @@ async function v53DeleteInsertOwn(table, memberId, rows){
   if(rows.length){ const {error}=await sb.from(table).insert(rows); if(error) throw error; }
 }
 
+let v143CalendarSyncBusy=false;
+let v143CalendarSyncTimer=null;
+
+async function v143SyncCalendarEvents(){
+  const sb=v53Client(), user=v53User();
+  if(!sb || !user || !v53.hydrated || !['admin','coach'].includes(v53.role)) return false;
+  if(v143CalendarSyncBusy) return false;
+  const events=(calendarData.events||[]).map(e=>({
+    id:Number(e.id),
+    event_date:String(e.date||'').slice(0,10),
+    event_type:eventTypeOf(e),
+    title:eventDisplayTitle(e),
+    report_date:eventReportDate(e)||null,
+    created_by:user.id,
+    updated_at:new Date().toISOString()
+  })).filter(e=>e.id>0 && /^\d{4}-\d{2}-\d{2}$/.test(e.event_date));
+  v143CalendarSyncBusy=true;
+  try{
+    if(events.length){
+      const {error}=await sb.from('calendar_events').upsert(events,{onConflict:'id'});
+      if(error) throw new Error(`calendar_events: ${error.message}`);
+    }
+    if(calendarData.period){
+      const {error}=await sb.from('calendar_settings').upsert({
+        id:true,
+        start_date:calendarData.period.start,
+        end_date:calendarData.period.end,
+        updated_by:user.id
+      },{onConflict:'id'});
+      if(error) throw new Error(`calendar_settings: ${error.message}`);
+    }
+    console.info('[V143] Synchronisation calendrier Supabase OK', {events:events.length});
+    return true;
+  }catch(error){
+    console.error('[V143] Synchronisation calendrier Supabase impossible',error);
+    v61LastSyncError=error;
+    toast(`Échec de synchronisation des événements : ${error?.message||'erreur inconnue'}`);
+    return false;
+  }finally{
+    v143CalendarSyncBusy=false;
+  }
+}
+
+function v143QueueCalendarSync(){
+  if(!window.v53?.enabled || !v53Session() || !v53.hydrated || !['admin','coach'].includes(v53.role)) return;
+  clearTimeout(v143CalendarSyncTimer);
+  v143CalendarSyncTimer=setTimeout(()=>{v143SyncCalendarEvents();},300);
+}
+
+async function v143SyncCalendarNow(){
+  if(!window.v53?.enabled || !v53Session() || !v53.hydrated || !['admin','coach'].includes(v53.role)) return false;
+  clearTimeout(v143CalendarSyncTimer);
+  return v143SyncCalendarEvents();
+}
+
 async function v53SyncRemote(){
   const sb=v53Client(), user=v53User();
   if(!sb || !user || (!v53.hydrated && !v53.bootstraping)) return;
@@ -2242,6 +2334,23 @@ async function v53SyncRemote(){
     const role=v53.role, mid=v53.memberId;
     // Tables communes : l'encadrement/admin peut synchroniser la totalité.
     if(role!=='member'){
+      // V143 : synchroniser les événements calendrier en priorité.
+      // Ainsi un problème RLS/validation sur une autre table ne bloque plus
+      // l'enregistrement des "Autres événements" dans Supabase.
+      const calendarEvents=(calendarData.events||[]).map(e=>({
+        id:Number(e.id),
+        event_date:String(e.date||'').slice(0,10),
+        event_type:eventTypeOf(e),
+        title:eventDisplayTitle(e),
+        report_date:eventReportDate(e)||null,
+        created_by:user.id,
+        updated_at:new Date().toISOString()
+      })).filter(e=>e.id>0 && /^\d{4}-\d{2}-\d{2}$/.test(e.event_date));
+      if(calendarEvents.length){
+        let r=await sb.from('calendar_events').upsert(calendarEvents,{onConflict:'id'});
+        if(r.error) throw new Error(`calendar_events: ${r.error.message}`);
+      }
+
       const members=(db.members||[]).map(m=>({id:Number(m.id),name:m.name,habitual_slot:[1,2,3].includes(Number(m.slot))?Number(m.slot):null,active:m.active!==false,change_count:Number(m.changeCount||0),role:normalizeRole(m.role)}));
       if(members.length){let r=await sb.from('members').upsert(members,{onConflict:'id'});if(r.error)throw r.error;}
       const profiles=await sb.from('profiles').select('id,member_id,role,active,display_name');
@@ -2269,8 +2378,6 @@ async function v53SyncRemote(){
       if(abs.length){r=await sb.from('absence_periods').upsert(abs,{onConflict:'id'});if(r.error)throw r.error;}
       const weeks=Object.entries(calendarData.weeks||{}).map(([week_start,w])=>({week_start,week_type:v53MapWeekType(w.type),label:w.label||w.type,report_date:w.reportDate||null,updated_by:user.id}));
       if(weeks.length){r=await sb.from('calendar_weeks').upsert(weeks,{onConflict:'week_start'});if(r.error)throw r.error;}
-      const events=(calendarData.events||[]).map(e=>({id:Number(e.id),event_date:e.date,event_type:eventTypeOf(e),title:eventDisplayTitle(e),report_date:eventReportDate(e)||null,created_by:user.id,updated_at:new Date().toISOString()}));
-      if(events.length){r=await sb.from('calendar_events').upsert(events,{onConflict:'id'});if(r.error)throw r.error;}
       if(calendarData.period){r=await sb.from('calendar_settings').upsert({id:true,start_date:calendarData.period.start,end_date:calendarData.period.end,updated_by:user.id},{onConflict:'id'});if(r.error)throw r.error;}
       const objectives=(db.sessionObjectives?Object.entries(db.sessionObjectives):[]).map(([session_date,objective])=>({session_date,objective:String(objective||''),updated_by:user.id}));
       if(objectives.length){r=await sb.from('session_objectives').upsert(objectives,{onConflict:'session_date'});if(r.error)throw r.error;}
@@ -2328,7 +2435,7 @@ function v53QueueSync(){
 const v53LocalSave=save;
 save=function(){ const ok=v53LocalSave(); v53QueueSync(); return ok; };
 const v53LocalSaveCalendar=saveCalendar;
-saveCalendar=function(){ const ok=v53LocalSaveCalendar(); v53QueueSync(); return ok; };
+saveCalendar=function(){ const ok=v53LocalSaveCalendar(); v53QueueSync(); v143QueueCalendarSync(); return ok; };
 
 function v53LoginOverlay(message="Connectez-vous à votre espace Don Bosco - Perfectionnement."){ showMemberLogin(message); }
 
@@ -2713,15 +2820,40 @@ window.addEventListener('offline',()=>{
     const {error}=await sb.from('push_subscriptions').update({active:false,disabled_by_user:true,updated_at:new Date().toISOString()}).eq('profile_id',user.id).eq('endpoint',sub.endpoint);
     if(error) console.warn('[V83] Suppression abonnement impossible.',error);
   }
+  function setButtonState(btn,state,label,title,disabled=false){
+    const labelEl=btn.querySelector('.notify-label');
+    btn.dataset.pushState=state;
+    btn.classList.toggle('push-active',state==='active');
+    btn.classList.toggle('push-disabled',state==='inactive'||state==='blocked');
+    btn.classList.toggle('push-unknown',state==='unknown');
+    if(labelEl) labelEl.textContent=label;
+    else btn.textContent=label;
+    btn.title=title||'';
+    btn.setAttribute('aria-label',label);
+    btn.disabled=!!disabled;
+  }
   async function updateButton(){
     const btn=document.getElementById('notifyBtn'); if(!btn) return;
-    if(!supports()){ btn.textContent='🔔 Notifications'; btn.disabled=true; btn.title='Notifications Push non supportées par ce navigateur.'; return; }
-    if(Notification.permission==='denied'){ btn.textContent='🔕 Notifications bloquées'; btn.disabled=false; btn.title='Autorisez les notifications dans les réglages du navigateur.'; return; }
+    if(!supports()){
+      setButtonState(btn,'unknown','Notifications','Notifications Push non supportées par ce navigateur.',true);
+      return;
+    }
+    if(Notification.permission==='denied'){
+      setButtonState(btn,'blocked','Notifications bloquées','Autorisez les notifications dans les réglages du navigateur.');
+      return;
+    }
     try{
       const sub=await (await registration()).pushManager.getSubscription();
-      if(Notification.permission==='granted'&&sub){ btn.textContent='🔔 Notifications activées'; btn.disabled=false; btn.title='Notifications Push activées sur cet appareil.'; }
-      else { btn.textContent='🔔 Activer les notifications'; btn.disabled=false; btn.title='Activer les notifications Push sur cet appareil.'; }
-    }catch(_){ btn.textContent='🔔 Activer les notifications'; btn.disabled=false; }
+      if(Notification.permission==='granted'&&sub){
+        setButtonState(btn,'active','Notifications activées','Notifications Push activées sur cet appareil.');
+      } else if(Notification.permission==='granted'&&!sub){
+        setButtonState(btn,'inactive','Notifications désactivées','Les notifications sont désactivées sur cet appareil. Cliquez pour les réactiver.');
+      } else {
+        setButtonState(btn,'unknown','Activer les notifications','Activer les notifications Push sur cet appareil.');
+      }
+    }catch(_){
+      setButtonState(btn,'inactive','Notifications désactivées','Les notifications sont désactivées sur cet appareil.');
+    }
   }
   async function subscribe(forceNew=false){
     if(busy) return; busy=true;

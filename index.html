@@ -11,7 +11,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <title>Don Bosco - Perfectionnement — Présences</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260919-v145">
 </head>
 <body>
   <header class="topbar">
@@ -27,7 +27,9 @@
     <div id="currentUserName" class="current-user-name" title="Utilisateur connecté"></div>
     <div id="connectionStatus" class="connection-status" title="État de la connexion">● En ligne</div>
     <button id="syncNowBtn" class="secondary" onclick="v60ManualSync()">↻ Synchroniser</button>
-    <button id="notifyBtn" class="secondary">🔔 Activer les notifications</button>
+    <button id="notifyBtn" class="secondary notify-btn" type="button" aria-label="Activer les notifications" data-push-state="unknown">
+      <span class="notify-icon" aria-hidden="true"><svg class="notify-svg" viewBox="0 0 24 24" focusable="false"><path class="notify-bell" d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path class="notify-slash" d="M4 4l16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="notify-label">Activer les notifications</span>
+    </button>
     <button id="profileBtn" class="secondary" onclick="openProfileMenu()">Profil</button>
   </header>
 
@@ -65,7 +67,7 @@
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="app.js?v=20260918-v138"></script>
-  <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {})); }</script>
+  <script src="app.js?v=20260919-v145"></script>
+  <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js?v=20260919-v145", {updateViaCache: "none"}).catch(() => {})); }</script>
 </body>
 </html>
