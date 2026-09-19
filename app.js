@@ -2719,9 +2719,20 @@ window.addEventListener('offline',()=>{
     if(Notification.permission==='denied'){ btn.textContent='🔕 Notifications bloquées'; btn.disabled=false; btn.title='Autorisez les notifications dans les réglages du navigateur.'; return; }
     try{
       const sub=await (await registration()).pushManager.getSubscription();
-      if(Notification.permission==='granted'&&sub){ btn.textContent='🔔 Notifications activées'; btn.disabled=false; btn.title='Notifications Push activées sur cet appareil.'; }
-      else { btn.textContent='🔔 Activer les notifications'; btn.disabled=false; btn.title='Activer les notifications Push sur cet appareil.'; }
-    }catch(_){ btn.textContent='🔔 Activer les notifications'; btn.disabled=false; }
+      if(Notification.permission==='granted'&&sub){
+        btn.textContent='🔔 Notifications activées';
+        btn.disabled=false;
+        btn.title='Notifications Push activées sur cet appareil.';
+      } else if(Notification.permission==='granted'&&!sub){
+        btn.textContent='🔕 Notifications désactivées';
+        btn.disabled=false;
+        btn.title='Les notifications sont désactivées sur cet appareil. Cliquez pour les réactiver.';
+      } else {
+        btn.textContent='🔔 Activer les notifications';
+        btn.disabled=false;
+        btn.title='Activer les notifications Push sur cet appareil.';
+      }
+    }catch(_){ btn.textContent='🔕 Notifications désactivées'; btn.disabled=false; }
   }
   async function subscribe(forceNew=false){
     if(busy) return; busy=true;
